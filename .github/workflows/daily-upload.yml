@@ -38,3 +38,5 @@ jobs:
           VIDEO_DESCRIPTION: ${{ secrets.VIDEO_DESCRIPTION }}
           VIDEO_TAGS: ${{ secrets.VIDEO_TAGS }}
           MAX_DURATION: ${{ secrets.MAX_DURATION }}
+          BASE_VIDEO_URLS: ${{ secrets.BASE_VIDEO_URLS }}
+          MUSIC_URLS: ${{ secrets.MUSIC_URLS }}

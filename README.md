@@ -107,6 +107,8 @@ Optional overrides:
 - `VIDEO_DESCRIPTION`
 - `VIDEO_TAGS` (comma separated)
 - `MAX_DURATION`
+- `BASE_VIDEO_URLS` (comma separated URLs)
+- `MUSIC_URLS` (comma separated URLs)
 
 ### 3) Enable the workflow
 
@@ -126,3 +128,23 @@ GitHub Actions runs:
 4. Upload to YouTube
 
 Temporary files are stored in `/tmp` and deleted after upload.
+
+### Generate a YouTube refresh token (one-time)
+
+Run locally (not in Actions):
+
+```bash
+node scripts/getYoutubeRefreshToken.js
+```
+
+It will print a URL. Open it, approve access, and the script will output a refresh token.  
+Save that token as the GitHub Secret `YOUTUBE_REFRESH_TOKEN`.
+
+### Use private URLs for base videos (optional)
+
+If you don’t want to commit videos to the repo, set these secrets:
+
+- `BASE_VIDEO_URLS` (comma separated URLs to video files)
+- `MUSIC_URLS` (comma separated URLs to audio files)
+
+The workflow downloads them into `/tmp` at runtime.

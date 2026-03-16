@@ -38,6 +38,54 @@ async function listMediaFiles(dir, exts) {
   }
 }
 
+function parseUrlList(raw) {
+  return (raw || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+async function downloadFile(url, destDir, fallbackName) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to download ${url}: ${response.status}`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const fileName = path.basename(new URL(url).pathname) || fallbackName;
+  const destPath = path.join(destDir, fileName);
+  await fs.writeFile(destPath, buffer);
+  return destPath;
+}
+
+async function downloadMediaList(urls, destDir, label) {
+  if (!urls.length) return [];
+  await fs.mkdir(destDir, { recursive: true });
+  const results = [];
+  for (let i = 0; i < urls.length; i += 1) {
+    const url = urls[i];
+    log(`Downloading ${label} ${i + 1}/${urls.length}`);
+    const filePath = await downloadFile(url, destDir, `${label}-${i + 1}`);
+    results.push(filePath);
+  }
+  return results;
+}
+
+async function retry(fn, attempts = 3, delayMs = 1500) {
+  let lastError;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      log(`Retry ${i + 1}/${attempts} failed: ${err.message}`);
+      if (i < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function getAccessToken() {
   const clientId = getEnv("YOUTUBE_CLIENT_ID");
   const clientSecret = getEnv("YOUTUBE_CLIENT_SECRET");
@@ -70,13 +118,25 @@ async function run() {
 
   const baseDir = path.join(process.cwd(), "base-videos");
   const musicDir = path.join(process.cwd(), "music");
+  const tempBaseDir = path.join(tempDir, "base-videos");
+  const tempMusicDir = path.join(tempDir, "music");
 
-  const baseVideos = await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
+  const baseVideoUrls = parseUrlList(getEnv("BASE_VIDEO_URLS"));
+  const musicUrls = parseUrlList(getEnv("MUSIC_URLS"));
+
+  const downloadedBase = await downloadMediaList(baseVideoUrls, tempBaseDir, "base-video");
+  const downloadedMusic = await downloadMediaList(musicUrls, tempMusicDir, "music");
+
+  const baseVideos = downloadedBase.length
+    ? downloadedBase.map((file) => path.basename(file))
+    : await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
   if (!baseVideos.length) {
     throw new Error("No base videos found. Add files to /base-videos in the repo.");
   }
 
-  const musicTracks = await listMediaFiles(musicDir, [".mp3", ".wav", ".m4a"]);
+  const musicTracks = downloadedMusic.length
+    ? downloadedMusic.map((file) => path.basename(file))
+    : await listMediaFiles(musicDir, [".mp3", ".wav", ".m4a"]);
   const baseVideo = baseVideos[Math.floor(Math.random() * baseVideos.length)];
   const musicFile = musicTracks.length ? musicTracks[Math.floor(Math.random() * musicTracks.length)] : "";
 
@@ -122,13 +182,20 @@ async function run() {
     voiceFile = voiceResult.file;
 
     log("Creating video");
+    const basePath = downloadedBase.length ? path.join(tempBaseDir, baseVideo) : path.join(baseDir, baseVideo);
+    const musicPath = musicFile
+      ? downloadedMusic.length
+        ? path.join(tempMusicDir, musicFile)
+        : path.join(musicDir, musicFile)
+      : null;
+
     videoPath = await generateVideo({
-      baseVideoPath: path.join(baseDir, baseVideo),
+      baseVideoPath: basePath,
       voicePath: path.join(tempDir, voiceFile),
       script,
       outDir: tempDir,
       title,
-      musicPath: musicFile ? path.join(musicDir, musicFile) : null,
+      musicPath,
       maxDuration,
     });
   } catch (err) {
@@ -138,14 +205,16 @@ async function run() {
 
   log("Uploading to YouTube");
   const accessToken = await getAccessToken();
-  const uploadResult = await uploadToYoutube({
-    accessToken,
-    refreshToken: getEnv("YOUTUBE_REFRESH_TOKEN"),
-    videoPath,
-    title,
-    description,
-    tags,
-  });
+  const uploadResult = await retry(() =>
+    uploadToYoutube({
+      accessToken,
+      refreshToken: getEnv("YOUTUBE_REFRESH_TOKEN"),
+      videoPath,
+      title,
+      description,
+      tags,
+    })
+  );
 
   log(`Upload complete: ${uploadResult?.id || "unknown id"}`);
 
