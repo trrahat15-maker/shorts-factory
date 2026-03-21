@@ -14,8 +14,8 @@ export async function generateScript(input, apiKeyFallback) {
   }
 
   prompt = (prompt || "").trim();
-  apiKey = (apiKey || "").trim();
-  baseUrl = (baseUrl || "").trim();
+  apiKey = (apiKey || "").replace(/\s+/g, "");
+  baseUrl = (baseUrl || "").replace(/\s+/g, "");
   model = (model || "").trim();
 
   if (!prompt) throw new Error("Missing prompt");
