@@ -101,6 +101,7 @@ Required:
 
 Optional overrides:
 - `OPENAI_MODEL`
+- `OPENAI_MODEL_FALLBACK`
 - `OPENAI_BASE_URL`
 - `ELEVENLABS_VOICE`
 - `VIDEO_TITLE`

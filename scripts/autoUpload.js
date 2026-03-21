@@ -149,6 +149,7 @@ async function run() {
 
   let openaiModel = getEnv("OPENAI_MODEL", "").trim();
   let openaiBaseUrl = getEnv("OPENAI_BASE_URL", "").trim();
+  const openaiFallbackModel = getEnv("OPENAI_MODEL_FALLBACK", "openrouter/free").trim();
   if (!openaiBaseUrl) {
     openaiBaseUrl = "https://openrouter.ai/api/v1";
   }
@@ -176,12 +177,32 @@ async function run() {
 
   try {
     log("Generating script");
-    const script = await generateScript({
-      prompt,
-      apiKey: getEnv("OPENAI_API_KEY").trim(),
-      baseUrl: openaiBaseUrl,
-      model: openaiModel,
-    });
+    const modelsToTry = [openaiModel, openaiFallbackModel].filter(Boolean);
+    let script = "";
+    let lastError = null;
+
+    for (const model of modelsToTry) {
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        try {
+          log(`Script attempt ${attempt} using model: ${model}`);
+          script = await generateScript({
+            prompt,
+            apiKey: getEnv("OPENAI_API_KEY").trim(),
+            baseUrl: openaiBaseUrl,
+            model,
+          });
+          if (script) break;
+        } catch (err) {
+          lastError = err;
+          log(`Script attempt failed: ${err.message}`);
+        }
+      }
+      if (script) break;
+    }
+
+    if (!script && lastError) {
+      throw lastError;
+    }
 
     log("Generating voice");
     const voiceResult = await generateVoice({
