@@ -13,6 +13,11 @@ export async function generateScript(input, apiKeyFallback) {
     apiKey = apiKeyFallback || "";
   }
 
+  prompt = (prompt || "").trim();
+  apiKey = (apiKey || "").trim();
+  baseUrl = (baseUrl || "").trim();
+  model = (model || "").trim();
+
   if (!prompt) throw new Error("Missing prompt");
   if (!apiKey) throw new Error("Missing OpenAI API key");
 

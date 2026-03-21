@@ -19,7 +19,9 @@ const REQUIRED_ENV = [
 ];
 
 function getEnv(name, fallback = "") {
-  return process.env[name] || fallback;
+  const value = process.env[name];
+  if (value === undefined || value === null || value === "") return fallback;
+  return value;
 }
 
 function requireEnv() {
@@ -145,12 +147,12 @@ async function run() {
     "Write a 30 second motivational speech for YouTube Shorts. Hook the viewer in the first sentence. Use simple powerful language."
   );
 
-  const openaiModel = getEnv("OPENAI_MODEL", "gpt-4o-mini");
-  const openaiBaseUrl = getEnv("OPENAI_BASE_URL", "");
-  const voice = getEnv("ELEVENLABS_VOICE", "alloy");
+  const openaiModel = getEnv("OPENAI_MODEL", "gpt-4o-mini").trim();
+  const openaiBaseUrl = getEnv("OPENAI_BASE_URL", "").trim();
+  const voice = getEnv("ELEVENLABS_VOICE", "alloy").trim();
   const maxDuration = Number(getEnv("MAX_DURATION", "0")) || 0;
 
-  const title = getEnv("VIDEO_TITLE", "Daily Motivation");
+  const title = getEnv("VIDEO_TITLE", "Daily Motivation").trim();
   const description = getEnv(
     "VIDEO_DESCRIPTION",
     "Daily motivational shorts.\n\nSubscribe for more success mindset content.\n\n#motivation #success #discipline"
@@ -167,7 +169,7 @@ async function run() {
     log("Generating script");
     const script = await generateScript({
       prompt,
-      apiKey: getEnv("OPENAI_API_KEY"),
+      apiKey: getEnv("OPENAI_API_KEY").trim(),
       baseUrl: openaiBaseUrl,
       model: openaiModel,
     });
@@ -176,7 +178,7 @@ async function run() {
     const voiceResult = await generateVoice({
       text: script,
       voice,
-      elevenLabsApiKey: getEnv("ELEVENLABS_API_KEY"),
+      elevenLabsApiKey: getEnv("ELEVENLABS_API_KEY").trim(),
       outDir: tempDir,
     });
     voiceFile = voiceResult.file;
