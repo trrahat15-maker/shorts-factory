@@ -13,10 +13,25 @@ export async function generateScript(input, apiKeyFallback) {
     apiKey = apiKeyFallback || "";
   }
 
-  prompt = (prompt || "").trim();
-  apiKey = (apiKey || "").replace(/\s+/g, "");
-  baseUrl = (baseUrl || "").replace(/\s+/g, "");
-  model = (model || "").trim();
+  const rawPrompt = prompt || "";
+  const rawKey = apiKey || "";
+  const rawBase = baseUrl || "";
+  const rawModel = model || "";
+
+  prompt = rawPrompt.trim();
+  apiKey = rawKey.replace(/\s+/g, "");
+  baseUrl = rawBase.replace(/\s+/g, "");
+  model = rawModel.trim();
+
+  const keyMatch = apiKey.match(/sk-[A-Za-z0-9_-]{20,}/);
+  if (keyMatch) {
+    apiKey = keyMatch[0];
+  }
+
+  const urlMatch = baseUrl.match(/https?:\/\/[^\s]+/);
+  if (urlMatch) {
+    baseUrl = urlMatch[0];
+  }
 
   if (!prompt) throw new Error("Missing prompt");
   if (!apiKey) throw new Error("Missing OpenAI API key");

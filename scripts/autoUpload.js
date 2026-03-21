@@ -147,8 +147,17 @@ async function run() {
     "Write a 30 second motivational speech for YouTube Shorts. Hook the viewer in the first sentence. Use simple powerful language."
   );
 
-  const openaiModel = getEnv("OPENAI_MODEL", "gpt-4o-mini").trim();
-  const openaiBaseUrl = getEnv("OPENAI_BASE_URL", "").trim();
+  let openaiModel = getEnv("OPENAI_MODEL", "").trim();
+  let openaiBaseUrl = getEnv("OPENAI_BASE_URL", "").trim();
+  if (!openaiBaseUrl) {
+    openaiBaseUrl = "https://openrouter.ai/api/v1";
+  }
+  if (!openaiModel && openaiBaseUrl.includes("openrouter.ai")) {
+    openaiModel = "openrouter/free";
+  }
+  if (!openaiModel) {
+    openaiModel = "gpt-4o-mini";
+  }
   const voice = getEnv("ELEVENLABS_VOICE", "alloy").trim();
   const maxDuration = Number(getEnv("MAX_DURATION", "0")) || 0;
 
