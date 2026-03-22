@@ -154,3 +154,25 @@ If you don't want to commit videos to the repo, set these secrets:
 - `MUSIC_URLS` (comma separated URLs to audio files)
 
 The workflow downloads them into `/tmp` at runtime.
+
+## AI Channel Analysis (Optional)
+
+Generate an AI report for your channel using the YouTube Data API + OpenAI.
+
+```bash
+node scripts/analyzeChannel.js
+```
+
+Required secrets (local `.env` or Actions):
+- `OPENAI_API_KEY`
+- `YOUTUBE_CLIENT_ID`
+- `YOUTUBE_CLIENT_SECRET`
+- `YOUTUBE_REFRESH_TOKEN`
+
+Optional:
+- `OPENAI_BASE_URL`
+- `OPENAI_MODEL`
+- `CHANNEL_ID` (defaults to the authenticated channel)
+- `CHANNEL_CONTEXT` (short channel description)
+- `ANALYSIS_VIDEO_COUNT` (default: 30)
+- `ANALYSIS_OUTPUT` (default: `analysis.md`)
