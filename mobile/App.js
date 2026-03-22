@@ -40,6 +40,9 @@ const DEFAULT_CONFIG = {
   uploadTime: "09:00",
   openaiModel: "gpt-4o-mini",
   openaiBaseUrl: "",
+  autoMetadata: true,
+  channelContext: "motivational shorts",
+  analysisVideoCount: 30,
   maxDuration: 0,
   subtitleStyle: { fontSize: 64, outline: 4 },
   defaultMusic: "",
@@ -50,6 +53,7 @@ const TAB_LIST = [
   { key: "home", label: "Home" },
   { key: "create", label: "Create" },
   { key: "library", label: "Library" },
+  { key: "insights", label: "Insights" },
   { key: "automation", label: "Automation" },
   { key: "settings", label: "Settings" },
 ];
@@ -57,6 +61,9 @@ const TAB_LIST = [
 const normalizeConfig = (config) => ({
   ...DEFAULT_CONFIG,
   ...config,
+  autoMetadata: config?.autoMetadata !== false,
+  channelContext: config?.channelContext || DEFAULT_CONFIG.channelContext,
+  analysisVideoCount: Number(config?.analysisVideoCount) || DEFAULT_CONFIG.analysisVideoCount,
   defaultTags: Array.isArray(config?.defaultTags) ? config.defaultTags : DEFAULT_CONFIG.defaultTags,
   subtitleStyle: {
     fontSize: Number(config?.subtitleStyle?.fontSize) || DEFAULT_CONFIG.subtitleStyle.fontSize,
@@ -87,13 +94,21 @@ export default function App() {
   const [script, setScript] = useState("");
   const [promptOverride, setPromptOverride] = useState("");
   const [titleOverride, setTitleOverride] = useState("");
+  const [descriptionOverride, setDescriptionOverride] = useState("");
+  const [tagsOverride, setTagsOverride] = useState("");
   const [voiceFile, setVoiceFile] = useState("");
   const [videoFile, setVideoFile] = useState("");
   const [status, setStatus] = useState("");
+  const [metadataStatus, setMetadataStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [automationEnabled, setAutomationEnabled] = useState(false);
   const [automationUpload, setAutomationUpload] = useState(false);
   const [youtubeStatus, setYoutubeStatus] = useState("Not connected");
+  const [analysisStatus, setAnalysisStatus] = useState("");
+  const [analysisReport, setAnalysisReport] = useState("");
+  const [analysisChannelId, setAnalysisChannelId] = useState("");
+  const [analysisVideoCount, setAnalysisVideoCount] = useState("30");
+  const [analysisChannelContext, setAnalysisChannelContext] = useState("");
 
   const apiBase = useApiBase(config);
 
@@ -121,6 +136,11 @@ export default function App() {
     if (!apiBase) return;
     refreshAll();
   }, [apiBase]);
+
+  useEffect(() => {
+    setAnalysisVideoCount(String(config.analysisVideoCount || 30));
+    setAnalysisChannelContext(config.channelContext || "motivational shorts");
+  }, [config.analysisVideoCount, config.channelContext]);
 
   useEffect(() => {
     if (!automationEnabled) return;
@@ -275,8 +295,43 @@ export default function App() {
       });
       setScript(data.script || "");
       setStatus("Script generated.");
+      setMetadataStatus("");
     } catch (err) {
       setStatus(err.message || "Script generation failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGenerateMetadata = async () => {
+    if (!script.trim()) {
+      setMetadataStatus("Generate a script first.");
+      return;
+    }
+    if (!openaiKey) {
+      setMetadataStatus("Add your OpenAI key in Settings.");
+      return;
+    }
+    setLoading(true);
+    setMetadataStatus("Generating metadata...");
+    try {
+      const data = await apiFetch("/api/metadata", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script,
+          apiKey: openaiKey,
+          baseUrl: config.openaiBaseUrl,
+          model: config.openaiModel,
+          channelContext: config.channelContext,
+        }),
+      });
+      if (data.title) setTitleOverride(data.title);
+      if (data.description) setDescriptionOverride(data.description);
+      if (Array.isArray(data.tags)) setTagsOverride(data.tags.join(", "));
+      setMetadataStatus("Metadata generated.");
+    } catch (err) {
+      setMetadataStatus(err.message || "Metadata generation failed.");
     } finally {
       setLoading(false);
     }
@@ -385,6 +440,35 @@ export default function App() {
     }
   };
 
+  const handleAnalyzeChannel = async () => {
+    if (!openaiKey) {
+      setAnalysisStatus("Add your OpenAI key in Settings.");
+      return;
+    }
+    setLoading(true);
+    setAnalysisStatus("Analyzing channel...");
+    try {
+      const data = await apiFetch("/api/channel/analysis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apiKey: openaiKey,
+          baseUrl: config.openaiBaseUrl,
+          model: config.openaiModel,
+          channelId: analysisChannelId.trim(),
+          channelContext: analysisChannelContext || config.channelContext,
+          maxVideos: Number(analysisVideoCount) || 30,
+        }),
+      });
+      setAnalysisReport(data.report || "No report returned.");
+      setAnalysisStatus("Analysis complete.");
+    } catch (err) {
+      setAnalysisStatus(err.message || "Analysis failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleUploadYoutube = async () => {
     if (!videoFile) {
       setStatus("Generate a video first.");
@@ -398,6 +482,10 @@ export default function App() {
         setStatus("Connect YouTube in Settings.");
         return;
       }
+      const tags = (tagsOverride || "")
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean);
       await apiFetch("/api/youtube/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -405,9 +493,9 @@ export default function App() {
           accessToken: tokens.access_token,
           refreshToken: tokens.refresh_token,
           videoFile,
-          title: config.defaultTitle,
-          description: config.defaultDescription,
-          tags: config.defaultTags,
+          title: titleOverride?.trim() || config.defaultTitle,
+          description: descriptionOverride?.trim() || config.defaultDescription,
+          tags: tags.length ? tags : config.defaultTags,
         }),
       });
       setStatus("Uploaded to YouTube.");
@@ -547,6 +635,10 @@ export default function App() {
               onChangeText={setScript}
               placeholder="Script will appear here"
             />
+            <Pressable style={styles.secondaryButton} onPress={handleGenerateMetadata}>
+              <Text style={styles.secondaryText}>Generate Title / Description / Tags</Text>
+            </Pressable>
+            {metadataStatus ? <Text style={styles.status}>{metadataStatus}</Text> : null}
             <Text style={styles.label}>Base Video</Text>
             {baseVideos.length ? (
               baseVideos.map((video) => (
@@ -563,12 +655,27 @@ export default function App() {
             ) : (
               <Text style={styles.text}>No base videos uploaded yet.</Text>
             )}
-            <Text style={styles.label}>Title Override</Text>
+            <Text style={styles.label}>Title</Text>
             <TextInput
               style={styles.input}
               value={titleOverride}
               onChangeText={setTitleOverride}
               placeholder={config.defaultTitle}
+            />
+            <Text style={styles.label}>Description</Text>
+            <TextInput
+              style={styles.textArea}
+              multiline
+              value={descriptionOverride}
+              onChangeText={setDescriptionOverride}
+              placeholder={config.defaultDescription}
+            />
+            <Text style={styles.label}>Tags (comma separated)</Text>
+            <TextInput
+              style={styles.input}
+              value={tagsOverride}
+              onChangeText={setTagsOverride}
+              placeholder={config.defaultTags.join(", ")}
             />
             <Pressable style={styles.button} onPress={handleGenerateVoice}>
               <Text style={styles.buttonText}>Generate Voice</Text>
@@ -649,6 +756,40 @@ export default function App() {
           </View>
         )}
 
+        {activeTab === "insights" && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Channel Insights</Text>
+            <Text style={styles.text}>Connect YouTube in Settings first.</Text>
+            <Text style={styles.label}>Channel ID (optional)</Text>
+            <TextInput
+              style={styles.input}
+              value={analysisChannelId}
+              onChangeText={setAnalysisChannelId}
+              placeholder="UC..."
+            />
+            <Text style={styles.label}>Videos to analyze</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="number-pad"
+              value={analysisVideoCount}
+              onChangeText={setAnalysisVideoCount}
+              placeholder="30"
+            />
+            <Text style={styles.label}>Channel context</Text>
+            <TextInput
+              style={styles.input}
+              value={analysisChannelContext}
+              onChangeText={setAnalysisChannelContext}
+              placeholder="Motivational English Shorts"
+            />
+            <Pressable style={styles.button} onPress={handleAnalyzeChannel}>
+              <Text style={styles.buttonText}>Analyze Channel</Text>
+            </Pressable>
+            {analysisStatus ? <Text style={styles.status}>{analysisStatus}</Text> : null}
+            {analysisReport ? <Text style={styles.report}>{analysisReport}</Text> : null}
+          </View>
+        )}
+
         {activeTab === "automation" && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Automation</Text>
@@ -701,6 +842,28 @@ export default function App() {
               style={styles.input}
               value={config.openaiBaseUrl}
               onChangeText={(value) => setConfig({ ...config, openaiBaseUrl: value })}
+            />
+            <View style={styles.rowBetween}>
+              <Text style={styles.text}>Auto-generate title/tags</Text>
+              <Switch
+                value={config.autoMetadata !== false}
+                onValueChange={(value) => setConfig({ ...config, autoMetadata: value })}
+              />
+            </View>
+            <Text style={styles.label}>Channel context</Text>
+            <TextInput
+              style={styles.input}
+              value={config.channelContext}
+              onChangeText={(value) => setConfig({ ...config, channelContext: value })}
+            />
+            <Text style={styles.label}>Analysis video count</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="number-pad"
+              value={String(config.analysisVideoCount || 30)}
+              onChangeText={(value) =>
+                setConfig({ ...config, analysisVideoCount: Number(value) || 30 })
+              }
             />
             <Text style={styles.label}>Default Script Prompt</Text>
             <TextInput
@@ -848,6 +1011,15 @@ const styles = StyleSheet.create({
   cardTitle: { fontWeight: "700", fontSize: 16, marginBottom: 8, color: "#1e1b16" },
   text: { color: "#1e1b16", marginBottom: 6 },
   status: { color: "#6a5f55", marginBottom: 8 },
+  report: {
+    color: "#1e1b16",
+    backgroundColor: "#fff3e3",
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+    fontSize: 12,
+    lineHeight: 18,
+  },
   input: {
     borderWidth: 1,
     borderColor: "rgba(30,20,10,0.12)",
