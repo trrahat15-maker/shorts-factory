@@ -1,5 +1,27 @@
 import OpenAI from "openai";
 
+function extractJson(text) {
+  if (!text) return null;
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeTags(tags) {
+  if (!tags) return [];
+  if (Array.isArray(tags)) {
+    return tags.map((tag) => String(tag).trim()).filter(Boolean);
+  }
+  return String(tags)
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
 export async function generateScript(input, apiKeyFallback) {
   let prompt = "";
   let apiKey = "";
@@ -54,4 +76,48 @@ export async function generateScript(input, apiKeyFallback) {
   const output = response.choices?.[0]?.message?.content?.trim();
   if (!output) throw new Error("OpenAI returned no text");
   return output;
+}
+
+export async function generateMetadata({ script, channelContext, apiKey, baseUrl, model }) {
+  const prompt = `You are a YouTube Shorts growth assistant.
+Generate metadata for this Shorts script.
+Return ONLY valid JSON with keys: title, description, tags.
+Constraints:
+- title: <= 90 characters
+- description: 2-3 short sentences + 3-6 hashtags
+- tags: 8-15 short keywords, no hashtags
+
+Channel context (if any): ${channelContext || "motivational shorts"}
+
+Script:
+${script}`;
+
+  const client = new OpenAI({
+    apiKey,
+    baseURL: baseUrl || undefined,
+  });
+
+  const response = await client.chat.completions.create({
+    model: model || "gpt-4o-mini",
+    messages: [
+      { role: "system", content: "You produce concise, high-performing YouTube Shorts metadata." },
+      { role: "user", content: prompt },
+    ],
+    max_tokens: 260,
+  });
+
+  const raw = response.choices?.[0]?.message?.content?.trim();
+  if (!raw) throw new Error("OpenAI returned no metadata");
+  const data = extractJson(raw);
+  if (!data) throw new Error("OpenAI metadata was not valid JSON");
+
+  const title = String(data.title || "").trim();
+  const description = String(data.description || "").trim();
+  const tags = normalizeTags(data.tags);
+
+  return {
+    title: title.length > 90 ? `${title.slice(0, 87).trim()}...` : title,
+    description,
+    tags,
+  };
 }

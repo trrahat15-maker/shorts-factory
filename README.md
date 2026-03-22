@@ -105,6 +105,8 @@ Optional overrides:
 - `OPENAI_MODEL_LIST` (comma separated list to try in order)
 - `OPENAI_MODEL_ATTEMPTS` (default: 2)
 - `OPENAI_RETRY_DELAYS` (comma separated seconds, default: `30,60,90`)
+- `AUTO_METADATA` (`true` or `false`, default: `true`)
+- `CHANNEL_CONTEXT` (short channel description for better titles/tags)
 - `OPENAI_BASE_URL`
 - `ELEVENLABS_VOICE`
 - `VIDEO_TITLE`

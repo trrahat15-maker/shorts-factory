@@ -3,7 +3,7 @@ import path from "path";
 import os from "os";
 import { google } from "googleapis";
 
-import { generateScript } from "../src/openai.js";
+import { generateMetadata, generateScript } from "../src/openai.js";
 import { generateVoice } from "../src/voice.js";
 import { generateVideo } from "../src/video.js";
 import { uploadToYoutube } from "../src/youtube.js";
@@ -212,15 +212,17 @@ async function run() {
   const voice = getEnv("ELEVENLABS_VOICE", "alloy").trim();
   const maxDuration = Number(getEnv("MAX_DURATION", "0")) || 0;
 
-  let title = getEnv("VIDEO_TITLE", "").trim();
-  const description = getEnv(
-    "VIDEO_DESCRIPTION",
-    "Daily motivational shorts.\n\nSubscribe for more success mindset content.\n\n#motivation #success #discipline"
-  );
-  const tags = getEnv("VIDEO_TAGS", "motivation,success,discipline,shorts")
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean);
+  const titleOverride = getEnv("VIDEO_TITLE", "").trim();
+  const descriptionOverride = getEnv("VIDEO_DESCRIPTION", "").trim();
+  const tagsOverride = parseCsv(getEnv("VIDEO_TAGS", ""));
+  const defaultDescription =
+    "Daily motivational shorts.\n\nSubscribe for more success mindset content.\n\n#motivation #success #discipline";
+  const defaultTags = ["motivation", "success", "discipline", "shorts"];
+  let title = titleOverride;
+  let description = descriptionOverride;
+  let tags = tagsOverride;
+  const channelContext = getEnv("CHANNEL_CONTEXT", "").trim();
+  const useAiMetadata = getEnv("AUTO_METADATA", "true").toLowerCase() !== "false";
 
   let voiceFile = "";
   let videoPath = "";
@@ -233,6 +235,7 @@ async function run() {
     let script = "";
     let lastError = null;
     const maxAttemptsPerModel = Number(getEnv("OPENAI_MODEL_ATTEMPTS", "2")) || 2;
+    let usedModel = openaiModel;
 
     for (const model of modelsToTry) {
       for (let attempt = 1; attempt <= maxAttemptsPerModel; attempt += 1) {
@@ -244,7 +247,10 @@ async function run() {
             baseUrl: openaiBaseUrl,
             model,
           });
-          if (script) break;
+          if (script) {
+            usedModel = model;
+            break;
+          }
         } catch (err) {
           lastError = err;
           const message = getErrorMessage(err);
@@ -268,8 +274,32 @@ async function run() {
       throw lastError;
     }
 
+    if (useAiMetadata) {
+      try {
+        log("Generating metadata");
+        const metadata = await generateMetadata({
+          script,
+          channelContext,
+          apiKey: getEnv("OPENAI_API_KEY").trim(),
+          baseUrl: openaiBaseUrl,
+          model: usedModel,
+        });
+        if (!titleOverride && metadata.title) title = metadata.title;
+        if (!descriptionOverride && metadata.description) description = metadata.description;
+        if (!tagsOverride.length && metadata.tags?.length) tags = metadata.tags;
+      } catch (err) {
+        log(`Metadata generation failed: ${err.message}`);
+      }
+    }
+
     if (!title) {
       title = buildTitleFromScript(script);
+    }
+    if (!description) {
+      description = defaultDescription;
+    }
+    if (!tags.length) {
+      tags = defaultTags;
     }
     log(`Using title: ${title}`);
     log(`Using tags: ${tags.join(", ") || "none"}`);
