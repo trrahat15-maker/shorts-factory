@@ -35,6 +35,20 @@ export async function handleYoutubeCallback(req) {
   return tokens;
 }
 
+export async function refreshYoutubeAccessToken(refreshToken) {
+  if (!refreshToken) {
+    throw new Error("Missing YouTube refresh token.");
+  }
+  const oauth2Client = createOAuthClient();
+  oauth2Client.setCredentials({ refresh_token: refreshToken });
+  const tokenResponse = await oauth2Client.getAccessToken();
+  const accessToken = tokenResponse?.token || tokenResponse;
+  if (!accessToken) {
+    throw new Error("Failed to refresh YouTube access token.");
+  }
+  return accessToken;
+}
+
 export async function uploadToYoutube({ accessToken, refreshToken, videoPath, title, description, tags = [] }) {
   const oauth2Client = createOAuthClient();
   oauth2Client.setCredentials({ access_token: accessToken, refresh_token: refreshToken });

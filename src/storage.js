@@ -29,6 +29,9 @@ export async function ensureStorage(...paths) {
       uploadTime: "09:00",
       openaiModel: "gpt-4o-mini",
       openaiBaseUrl: "",
+      autoMetadata: true,
+      channelContext: "motivational shorts",
+      analysisVideoCount: 30,
       musicVolume: 0.18,
       maxDuration: 0,
       subtitleStyle: {

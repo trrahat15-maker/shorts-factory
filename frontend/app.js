@@ -132,6 +132,9 @@ function normalizeConfig(config = {}) {
     uploadTime: config.uploadTime || "09:00",
     openaiModel: config.openaiModel || "gpt-4o-mini",
     openaiBaseUrl: config.openaiBaseUrl || "",
+    autoMetadata: config.autoMetadata !== false,
+    channelContext: config.channelContext || "motivational shorts",
+    analysisVideoCount: Number(config.analysisVideoCount) || 30,
     maxDuration: Number(config.maxDuration) || 0,
     subtitleStyle: {
       fontSize: Number(config.subtitleStyle?.fontSize) || 64,
@@ -148,6 +151,10 @@ function applyConfigToUI(config) {
   $("#voice-voice").value = config.defaultVoice;
   $("#default-title").value = config.defaultTitle;
   $("#video-title").value = config.defaultTitle;
+  const descriptionField = $("#video-description");
+  if (descriptionField) descriptionField.value = config.defaultDescription;
+  const tagsField = $("#video-tags");
+  if (tagsField) tagsField.value = (config.defaultTags || []).join(", ");
   $("#default-description").value = config.defaultDescription;
   $("#default-tags").value = (config.defaultTags || []).join(", ");
   $("#videos-per-day").value = config.videosPerDay;
@@ -158,6 +165,14 @@ function applyConfigToUI(config) {
   $("#max-duration").value = config.maxDuration || 0;
   $("#subtitle-size").value = config.subtitleStyle?.fontSize || 64;
   $("#subtitle-outline").value = config.subtitleStyle?.outline || 4;
+  const autoMetadata = $("#auto-metadata");
+  if (autoMetadata) autoMetadata.checked = config.autoMetadata !== false;
+  const channelContext = $("#channel-context");
+  if (channelContext) channelContext.value = config.channelContext || "";
+  const analysisCount = $("#analysis-video-count");
+  if (analysisCount) analysisCount.value = config.analysisVideoCount || 30;
+  const analysisContext = $("#analysis-channel-context");
+  if (analysisContext) analysisContext.value = config.channelContext || "";
 }
 
 async function loadSettings() {
@@ -187,6 +202,9 @@ async function saveConfig() {
     uploadTime: $("#upload-time").value || "09:00",
     openaiModel: $("#openai-model").value.trim() || "gpt-4o-mini",
     openaiBaseUrl: $("#openai-base").value.trim(),
+    autoMetadata: $("#auto-metadata")?.checked ?? true,
+    channelContext: $("#channel-context")?.value?.trim() || "motivational shorts",
+    analysisVideoCount: Number($("#analysis-video-count")?.value) || 30,
     maxDuration: Number($("#default-max-duration").value) || 0,
     subtitleStyle: {
       fontSize: Number($("#subtitle-size").value) || 64,
@@ -415,10 +433,45 @@ async function handleGenerateScript() {
       }),
     });
     $("#script-output").value = script;
+    setStatus("#metadata-status", "");
     setStatus("#home-status", "Script generated.");
   } catch (err) {
     console.error(err);
     setStatus("#home-status", "Script generation failed.");
+  }
+}
+
+async function handleGenerateMetadata() {
+  const script = $("#script-output").value.trim();
+  const key = state.secrets.openaiKey;
+  if (!script) {
+    setStatus("#metadata-status", "Generate a script first.");
+    return;
+  }
+  if (!key) {
+    setStatus("#metadata-status", "Unlock the vault and add your OpenAI key in Settings.");
+    return;
+  }
+  setStatus("#metadata-status", "Generating metadata...");
+  try {
+    const result = await api("/api/metadata", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        script,
+        apiKey: key,
+        baseUrl: state.config.openaiBaseUrl,
+        model: state.config.openaiModel,
+        channelContext: state.config.channelContext,
+      }),
+    });
+    if (result.title) $("#video-title").value = result.title;
+    if (result.description) $("#video-description").value = result.description;
+    if (result.tags?.length) $("#video-tags").value = result.tags.join(", ");
+    setStatus("#metadata-status", "Metadata generated.");
+  } catch (err) {
+    console.error(err);
+    setStatus("#metadata-status", "Metadata generation failed.");
   }
 }
 
@@ -563,8 +616,12 @@ async function handleUploadYoutube() {
       return;
     }
     const title = $("#video-title").value.trim() || state.config.defaultTitle;
-    const description = state.config.defaultDescription;
-    const tags = state.config.defaultTags;
+    const description = $("#video-description")?.value.trim() || state.config.defaultDescription;
+    const tagsInput = $("#video-tags")?.value || "";
+    const tags = tagsInput
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
     await api("/api/youtube/upload", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -574,7 +631,7 @@ async function handleUploadYoutube() {
         videoFile: state.lastVideoFile,
         title,
         description,
-        tags,
+        tags: tags.length ? tags : state.config.defaultTags,
       }),
     });
     setStatus("#video-status", "Uploaded to YouTube.");
@@ -604,6 +661,39 @@ async function checkYoutubeStatus() {
     }
   } catch (err) {
     console.error(err);
+  }
+}
+
+async function handleAnalyzeChannel() {
+  const key = state.secrets.openaiKey;
+  if (!key) {
+    setStatus("#analysis-status", "Unlock the vault and add your OpenAI key in Settings.");
+    return;
+  }
+  setStatus("#analysis-status", "Analyzing channel...");
+  try {
+    const channelId = $("#analysis-channel-id")?.value.trim();
+    const channelContext = $("#analysis-channel-context")?.value.trim() || state.config.channelContext;
+    const maxVideos = Number($("#analysis-video-count")?.value) || state.config.analysisVideoCount || 30;
+    const result = await api("/api/channel/analysis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiKey: key,
+        baseUrl: state.config.openaiBaseUrl,
+        model: state.config.openaiModel,
+        channelId,
+        channelContext,
+        maxVideos,
+      }),
+    });
+    const report = result.report || "No report returned.";
+    const output = $("#analysis-output");
+    if (output) output.textContent = report;
+    setStatus("#analysis-status", "Analysis complete.");
+  } catch (err) {
+    console.error(err);
+    setStatus("#analysis-status", "Channel analysis failed.");
   }
 }
 
@@ -664,6 +754,7 @@ function attachListeners() {
 
   $("#upload-base").addEventListener("change", handleUploadBase);
   $("#generate-script").addEventListener("click", handleGenerateScript);
+  $("#generate-metadata").addEventListener("click", handleGenerateMetadata);
   $("#generate-voice").addEventListener("click", handleGenerateVoice);
   $("#generate-video").addEventListener("click", handleGenerateVideo);
   $("#upload-youtube").addEventListener("click", handleUploadYoutube);
@@ -672,6 +763,7 @@ function attachListeners() {
   $("#connect-youtube").addEventListener("click", handleConnectYoutube);
   $("#unlock-vault").addEventListener("click", unlockVault);
   $("#music-upload").addEventListener("change", handleUploadMusic);
+  $("#run-analysis").addEventListener("click", handleAnalyzeChannel);
 
   $("#base-video").addEventListener("change", (event) => {
     state.selectedBaseVideo = event.target.value;

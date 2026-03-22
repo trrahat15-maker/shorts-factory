@@ -43,6 +43,7 @@ Then open the Replit preview or go to `http://localhost:3000`.
 3. In **Create**, generate a script, voice, and video.
 4. Connect YouTube in **Settings** to enable uploads.
 5. Use **Automation** to schedule daily generation while the app is running.
+6. Use **Insights** to analyze your channel and get AI growth suggestions.
 
 ## Notes
 
@@ -50,6 +51,7 @@ Then open the Replit preview or go to `http://localhost:3000`.
 - ElevenLabs is required for exporting MP3 narration and video generation.
 - Replit may sleep after inactivity; automation runs only while the app is open.
 - Base videos are automatically cropped to 9:16 and looped to match narration length.
+- Auto metadata can be toggled in **Settings** and uses your script to generate titles, descriptions, and tags.
 
 ## Mobile App (Expo)
 

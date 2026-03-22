@@ -5,10 +5,16 @@ import { fileURLToPath } from "url";
 import multer from "multer";
 import fs from "fs/promises";
 
-import { generateScript } from "./src/openai.js";
+import { generateMetadata, generateScript } from "./src/openai.js";
 import { generateVoice } from "./src/voice.js";
 import { generateVideo } from "./src/video.js";
-import { youtubeAuthUrl, handleYoutubeCallback, uploadToYoutube } from "./src/youtube.js";
+import { analyzeChannel } from "./src/channelAnalysis.js";
+import {
+  refreshYoutubeAccessToken,
+  youtubeAuthUrl,
+  handleYoutubeCallback,
+  uploadToYoutube,
+} from "./src/youtube.js";
 import {
   ensureStorage,
   listHistory,
@@ -63,6 +69,26 @@ app.post("/api/script", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: error.message || "Failed to generate script" });
+  }
+});
+
+app.post("/api/metadata", async (req, res) => {
+  try {
+    const { script, apiKey, baseUrl, model, channelContext } = req.body;
+    if (!script || !apiKey) {
+      return res.status(400).json({ error: "Missing script or apiKey" });
+    }
+    const metadata = await generateMetadata({
+      script,
+      apiKey,
+      baseUrl,
+      model,
+      channelContext,
+    });
+    res.json(metadata);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message || "Failed to generate metadata" });
   }
 });
 
@@ -173,6 +199,37 @@ app.get("/api/youtube/tokens", async (req, res) => {
   res.json(tokens);
 });
 
+app.post("/api/channel/analysis", async (req, res) => {
+  try {
+    const { apiKey, baseUrl, model, channelId, channelContext, maxVideos } = req.body || {};
+    if (!apiKey) {
+      return res.status(400).json({ error: "Missing OpenAI API key." });
+    }
+    const tokens = await getYoutubeTokens();
+    let accessToken = tokens.access_token;
+    if (!accessToken && tokens.refresh_token) {
+      accessToken = await refreshYoutubeAccessToken(tokens.refresh_token);
+    }
+    if (!accessToken) {
+      return res.status(400).json({ error: "Connect YouTube in Settings first." });
+    }
+
+    const result = await analyzeChannel({
+      accessToken,
+      channelId,
+      maxVideos: Number(maxVideos) || 30,
+      openaiKey: apiKey,
+      baseUrl,
+      model,
+      channelContext,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || "Channel analysis failed" });
+  }
+});
+
 app.post("/api/youtube/upload", async (req, res) => {
   try {
     const { accessToken, refreshToken, videoFile, title, description, tags } = req.body;
@@ -224,6 +281,7 @@ app.post("/api/automation/run", async (req, res) => {
     const tokens = upload ? await getYoutubeTokens() : {};
     const results = [];
     const count = Number(config.videosPerDay) || 1;
+    const useAutoMetadata = config.autoMetadata !== false;
 
     for (let i = 0; i < count; i += 1) {
       const baseVideo = baseVideos[Math.floor(Math.random() * baseVideos.length)];
@@ -234,6 +292,26 @@ app.post("/api/automation/run", async (req, res) => {
         baseUrl: openaiBaseUrl || config.openaiBaseUrl,
         model: openaiModel || config.openaiModel,
       });
+
+      let videoTitle = config.defaultTitle;
+      let videoDescription = config.defaultDescription;
+      let videoTags = config.defaultTags;
+      if (useAutoMetadata) {
+        try {
+          const metadata = await generateMetadata({
+            script,
+            apiKey: openaiKey,
+            baseUrl: openaiBaseUrl || config.openaiBaseUrl,
+            model: openaiModel || config.openaiModel,
+            channelContext: config.channelContext,
+          });
+          if (metadata.title) videoTitle = metadata.title;
+          if (metadata.description) videoDescription = metadata.description;
+          if (metadata.tags?.length) videoTags = metadata.tags;
+        } catch (err) {
+          console.error("Metadata generation failed:", err.message);
+        }
+      }
 
       const voiceResult = await generateVoice({
         text: script,
@@ -247,7 +325,7 @@ app.post("/api/automation/run", async (req, res) => {
         voicePath: path.join(GENERATED_DIR, voiceResult.file),
         script,
         outDir: GENERATED_DIR,
-        title: config.defaultTitle,
+        title: videoTitle,
         musicPath: musicFile ? path.join(MUSIC_DIR, path.basename(musicFile)) : null,
         maxDuration: maxDuration || config.maxDuration,
         subtitleStyle: config.subtitleStyle,
@@ -256,7 +334,7 @@ app.post("/api/automation/run", async (req, res) => {
 
       const historyItem = {
         id: `${Date.now()}-${i}`,
-        title: config.defaultTitle || "Daily Short",
+        title: videoTitle || "Daily Short",
         file: path.basename(videoPath),
         createdAt: new Date().toISOString(),
         status: "done",
@@ -269,9 +347,9 @@ app.post("/api/automation/run", async (req, res) => {
           accessToken: tokens.access_token,
           refreshToken: tokens.refresh_token,
           videoPath,
-          title: config.defaultTitle,
-          description: config.defaultDescription,
-          tags: config.defaultTags,
+          title: videoTitle,
+          description: videoDescription,
+          tags: videoTags,
         });
       }
 

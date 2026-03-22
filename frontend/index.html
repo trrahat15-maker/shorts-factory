@@ -16,6 +16,7 @@
       <button class="tab active" data-tab="home">Home</button>
       <button class="tab" data-tab="create">Create</button>
       <button class="tab" data-tab="library">Library</button>
+      <button class="tab" data-tab="insights">Insights</button>
       <button class="tab" data-tab="automation">Automation</button>
       <button class="tab" data-tab="settings">Settings</button>
     </nav>
@@ -47,6 +48,18 @@
       </div>
 
       <div class="card">
+        <h3>AI Metadata</h3>
+        <button id="generate-metadata" class="secondary" type="button">Generate Title, Description, Tags</button>
+        <label for="video-title">Title</label>
+        <input id="video-title" placeholder="Shorts title" />
+        <label for="video-description">Description</label>
+        <textarea id="video-description" rows="3" placeholder="Shorts description"></textarea>
+        <label for="video-tags">Tags (comma separated)</label>
+        <input id="video-tags" placeholder="motivation, success, discipline" />
+        <div id="metadata-status" class="status"></div>
+      </div>
+
+      <div class="card">
         <label for="voice-voice">Voice</label>
         <input id="voice-voice" placeholder="ElevenLabs voice (e.g. alloy)" />
         <button id="generate-voice">Generate Voice</button>
@@ -54,8 +67,6 @@
       </div>
 
       <div class="card">
-        <label for="video-title">Title</label>
-        <input id="video-title" placeholder="Shorts title" />
         <label for="max-duration">Max duration (seconds, optional)</label>
         <input id="max-duration" type="number" min="0" placeholder="0 = auto" />
         <label for="music-select">Background music</label>
@@ -87,6 +98,25 @@
       <div class="card">
         <h3>History</h3>
         <ul id="history"></ul>
+      </div>
+    </main>
+
+    <main class="panel hidden" id="insights">
+      <h2>Channel Insights</h2>
+      <div class="card">
+        <p>Analyze your YouTube channel and get an AI growth plan. Connect YouTube in Settings first.</p>
+        <label for="analysis-channel-id">Channel ID (optional)</label>
+        <input id="analysis-channel-id" placeholder="UC..." />
+        <label for="analysis-video-count">Videos to analyze</label>
+        <input id="analysis-video-count" type="number" min="5" max="50" value="30" />
+        <label for="analysis-channel-context">Channel context</label>
+        <input id="analysis-channel-context" placeholder="Motivational English Shorts" />
+        <button id="run-analysis">Analyze Channel</button>
+        <div id="analysis-status" class="status"></div>
+      </div>
+      <div class="card">
+        <h3>AI Report</h3>
+        <pre id="analysis-output" class="report">Run analysis to see results.</pre>
       </div>
     </main>
 
@@ -135,6 +165,12 @@
         <input id="openai-base" placeholder="https://api.openai.com/v1" />
         <label for="openai-model">OpenAI Model</label>
         <input id="openai-model" placeholder="gpt-4o-mini" />
+        <label class="checkbox">
+          <input id="auto-metadata" type="checkbox" />
+          Auto-generate title, description, and tags
+        </label>
+        <label for="channel-context">Channel context</label>
+        <input id="channel-context" placeholder="Motivational English Shorts" />
       </div>
       <div class="card">
         <h3>Voice Settings</h3>
