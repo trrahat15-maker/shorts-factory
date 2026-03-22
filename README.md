@@ -90,7 +90,7 @@ Optional background music:
 
 ### 2) Add required GitHub Secrets
 
-In your GitHub repo: **Settings → Secrets and variables → Actions → New repository secret**
+In your GitHub repo: **Settings -> Secrets and variables -> Actions -> New repository secret**
 
 Required:
 - `OPENAI_API_KEY`
@@ -103,6 +103,8 @@ Optional overrides:
 - `OPENAI_MODEL`
 - `OPENAI_MODEL_FALLBACK`
 - `OPENAI_MODEL_LIST` (comma separated list to try in order)
+- `OPENAI_MODEL_ATTEMPTS` (default: 2)
+- `OPENAI_RETRY_DELAYS` (comma separated seconds, default: `30,60,90`)
 - `OPENAI_BASE_URL`
 - `ELEVENLABS_VOICE`
 - `VIDEO_TITLE`
@@ -144,7 +146,7 @@ Save that token as the GitHub Secret `YOUTUBE_REFRESH_TOKEN`.
 
 ### Use private URLs for base videos (optional)
 
-If you don’t want to commit videos to the repo, set these secrets:
+If you don't want to commit videos to the repo, set these secrets:
 
 - `BASE_VIDEO_URLS` (comma separated URLs to video files)
 - `MUSIC_URLS` (comma separated URLs to audio files)

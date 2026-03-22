@@ -58,6 +58,15 @@ function isRateLimitError(err) {
   return err?.status === 429 || err?.code === 429 || err?.error?.code === 429;
 }
 
+function getErrorMessage(err) {
+  return (
+    err?.error?.metadata?.raw ||
+    err?.error?.message ||
+    err?.message ||
+    ""
+  );
+}
+
 async function sleep(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -165,12 +174,23 @@ async function run() {
   let openaiModel = getEnv("OPENAI_MODEL", "").trim();
   let openaiBaseUrl = getEnv("OPENAI_BASE_URL", "").trim();
   let openaiFallbackModel = getEnv("OPENAI_MODEL_FALLBACK", "").trim();
-  const modelList = parseCsv(getEnv("OPENAI_MODEL_LIST", ""));
+  let modelList = parseCsv(getEnv("OPENAI_MODEL_LIST", ""));
+  const retryDelays = parseCsv(getEnv("OPENAI_RETRY_DELAYS", "30,60,90"))
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
   if (!openaiBaseUrl) {
     openaiBaseUrl = "https://openrouter.ai/api/v1";
   }
   if (!openaiFallbackModel && openaiBaseUrl.includes("openrouter.ai")) {
     openaiFallbackModel = "meta-llama/llama-3.2-3b-instruct:free";
+  }
+  if (!modelList.length && openaiBaseUrl.includes("openrouter.ai")) {
+    modelList = [
+      "meta-llama/llama-3.2-3b-instruct:free",
+      "stepfun/step-3.5-flash:free",
+      "openrouter/free",
+      "google/gemini-3.1-flash-lite-preview",
+    ];
   }
   if (!openaiModel && openaiFallbackModel) {
     openaiModel = openaiFallbackModel;
@@ -201,9 +221,10 @@ async function run() {
     );
     let script = "";
     let lastError = null;
+    const maxAttemptsPerModel = Number(getEnv("OPENAI_MODEL_ATTEMPTS", "2")) || 2;
 
     for (const model of modelsToTry) {
-      for (let attempt = 1; attempt <= 2; attempt += 1) {
+      for (let attempt = 1; attempt <= maxAttemptsPerModel; attempt += 1) {
         try {
           log(`Script attempt ${attempt} using model: ${model}`);
           script = await generateScript({
@@ -215,11 +236,17 @@ async function run() {
           if (script) break;
         } catch (err) {
           lastError = err;
-          log(`Script attempt failed: ${err.message}`);
+          const message = getErrorMessage(err);
+          log(`Script attempt failed: ${message}`);
           if (isRateLimitError(err)) {
-            const waitMs = 20000 + attempt * 10000;
-            log(`Rate limit hit. Waiting ${Math.round(waitMs / 1000)}s before retry...`);
-            await sleep(waitMs);
+            const delaySeconds = retryDelays[Math.min(attempt - 1, retryDelays.length - 1)] || 30;
+            const jitterMs = Math.floor(Math.random() * 5000);
+            log(`Rate limit hit. Waiting ${delaySeconds}s before retry...`);
+            await sleep(delaySeconds * 1000 + jitterMs);
+            if (modelsToTry.length > 1 && message.toLowerCase().includes("rate-limited")) {
+              log("Rate limit persists. Rotating to next model.");
+              break;
+            }
           }
         }
       }
