@@ -6,13 +6,14 @@ export async function generateVoice({ text, voice = "alloy", elevenLabsApiKey, o
   const filename = `voice-${Date.now()}.mp3`;
   const outPath = path.join(outDir, filename);
 
-  if (elevenLabsApiKey) {
+  const apiKey = (elevenLabsApiKey || "").replace(/\s+/g, "");
+  if (apiKey) {
     const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}`;
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "xi-api-key": elevenLabsApiKey,
+        "xi-api-key": apiKey,
       },
       body: JSON.stringify({ text }),
     });

@@ -149,12 +149,15 @@ async function run() {
 
   let openaiModel = getEnv("OPENAI_MODEL", "").trim();
   let openaiBaseUrl = getEnv("OPENAI_BASE_URL", "").trim();
-  const openaiFallbackModel = getEnv("OPENAI_MODEL_FALLBACK", "openrouter/free").trim();
+  let openaiFallbackModel = getEnv("OPENAI_MODEL_FALLBACK", "").trim();
   if (!openaiBaseUrl) {
     openaiBaseUrl = "https://openrouter.ai/api/v1";
   }
-  if (!openaiModel && openaiBaseUrl.includes("openrouter.ai")) {
-    openaiModel = "openrouter/free";
+  if (!openaiFallbackModel && openaiBaseUrl.includes("openrouter.ai")) {
+    openaiFallbackModel = "meta-llama/llama-3.2-3b-instruct:free";
+  }
+  if (!openaiModel && openaiFallbackModel) {
+    openaiModel = openaiFallbackModel;
   }
   if (!openaiModel) {
     openaiModel = "gpt-4o-mini";
@@ -208,7 +211,7 @@ async function run() {
     const voiceResult = await generateVoice({
       text: script,
       voice,
-      elevenLabsApiKey: getEnv("ELEVENLABS_API_KEY").trim(),
+      elevenLabsApiKey: getEnv("ELEVENLABS_API_KEY").replace(/\s+/g, ""),
       outDir: tempDir,
     });
     voiceFile = voiceResult.file;
