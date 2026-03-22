@@ -47,6 +47,21 @@ function parseUrlList(raw) {
     .filter(Boolean);
 }
 
+function parseCsv(raw) {
+  return (raw || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isRateLimitError(err) {
+  return err?.status === 429 || err?.code === 429 || err?.error?.code === 429;
+}
+
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function downloadFile(url, destDir, fallbackName) {
   const response = await fetch(url);
   if (!response.ok) {
@@ -150,6 +165,7 @@ async function run() {
   let openaiModel = getEnv("OPENAI_MODEL", "").trim();
   let openaiBaseUrl = getEnv("OPENAI_BASE_URL", "").trim();
   let openaiFallbackModel = getEnv("OPENAI_MODEL_FALLBACK", "").trim();
+  const modelList = parseCsv(getEnv("OPENAI_MODEL_LIST", ""));
   if (!openaiBaseUrl) {
     openaiBaseUrl = "https://openrouter.ai/api/v1";
   }
@@ -180,7 +196,9 @@ async function run() {
 
   try {
     log("Generating script");
-    const modelsToTry = [openaiModel, openaiFallbackModel].filter(Boolean);
+    const modelsToTry = Array.from(
+      new Set([openaiModel, ...modelList, openaiFallbackModel].filter(Boolean))
+    );
     let script = "";
     let lastError = null;
 
@@ -198,6 +216,11 @@ async function run() {
         } catch (err) {
           lastError = err;
           log(`Script attempt failed: ${err.message}`);
+          if (isRateLimitError(err)) {
+            const waitMs = 20000 + attempt * 10000;
+            log(`Rate limit hit. Waiting ${Math.round(waitMs / 1000)}s before retry...`);
+            await sleep(waitMs);
+          }
         }
       }
       if (script) break;
