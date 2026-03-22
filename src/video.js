@@ -77,6 +77,15 @@ function buildSubtitleFilters(subtitles, style = {}) {
   });
 }
 
+function shouldRetryWithoutSubtitles(err) {
+  const message = `${err?.message || ""} ${err?.stderr || ""}`.toLowerCase();
+  return (
+    message.includes("no such filter") ||
+    message.includes("filter not found") ||
+    message.includes("drawtext")
+  );
+}
+
 export async function generateVideo({
   baseVideoPath,
   voicePath,
@@ -107,62 +116,73 @@ export async function generateVideo({
   ];
   const videoFilters = baseFilters.concat(subtitleFilters);
 
-  return new Promise((resolve, reject) => {
-    const command = ffmpeg()
-      .input(baseVideoPath)
-      .inputOptions(["-stream_loop", "-1"]);
+  const runFfmpeg = (filters) =>
+    new Promise((resolve, reject) => {
+      const command = ffmpeg()
+        .input(baseVideoPath)
+        .inputOptions(["-stream_loop", "-1"]);
 
-    if (voicePath) {
-      command.input(voicePath);
-    }
+      if (voicePath) {
+        command.input(voicePath);
+      }
 
-    if (musicPath) {
-      command.input(musicPath).inputOptions(["-stream_loop", "-1"]);
-    }
+      if (musicPath) {
+        command.input(musicPath).inputOptions(["-stream_loop", "-1"]);
+      }
 
-    command.videoFilters(videoFilters.join(","));
+      command.videoFilters(filters.join(","));
 
-    const maps = ["0:v"];
-    const complexFilters = [];
-    const bgVolume = typeof musicVolume === "number" ? musicVolume : 0.18;
-    if (voicePath && musicPath) {
-      complexFilters.push("[1:a]volume=1.0[voice]");
-      complexFilters.push(`[2:a]volume=${bgVolume}[music]`);
-      complexFilters.push("[voice][music]amix=inputs=2:duration=first:dropout_transition=0[aout]");
-      maps.push("[aout]");
-    } else if (voicePath) {
-      maps.push("1:a");
-    } else if (musicPath) {
-      complexFilters.push(`[1:a]volume=${bgVolume}[aout]`);
-      maps.push("[aout]");
-    }
+      const maps = ["0:v"];
+      const complexFilters = [];
+      const bgVolume = typeof musicVolume === "number" ? musicVolume : 0.18;
+      if (voicePath && musicPath) {
+        complexFilters.push("[1:a]volume=1.0[voice]");
+        complexFilters.push(`[2:a]volume=${bgVolume}[music]`);
+        complexFilters.push("[voice][music]amix=inputs=2:duration=first:dropout_transition=0[aout]");
+        maps.push("[aout]");
+      } else if (voicePath) {
+        maps.push("1:a");
+      } else if (musicPath) {
+        complexFilters.push(`[1:a]volume=${bgVolume}[aout]`);
+        maps.push("[aout]");
+      }
 
-    if (complexFilters.length) {
-      command.complexFilter(complexFilters);
-    }
+      if (complexFilters.length) {
+        command.complexFilter(complexFilters);
+      }
 
-    maps.forEach((map) => {
-      command.outputOptions(["-map", map]);
+      maps.forEach((map) => {
+        command.outputOptions(["-map", map]);
+      });
+
+      const outputOptions = [
+        "-preset veryfast",
+        "-crf 23",
+        "-movflags +faststart",
+        "-shortest",
+        "-r 30",
+      ];
+      command.outputOptions(outputOptions);
+      if (maxDuration) {
+        command.outputOptions(["-t", `${Number(maxDuration)}`]);
+      }
+
+      command
+        .output(outputPath)
+        .on("error", (err) => reject(err))
+        .on("end", () => resolve(outputPath))
+        .run();
     });
 
-    const outputOptions = [
-      "-preset veryfast",
-      "-crf 23",
-      "-movflags +faststart",
-      "-shortest",
-      "-r 30",
-    ];
-    command.outputOptions(outputOptions);
-    if (maxDuration) {
-      command.outputOptions(["-t", `${Number(maxDuration)}`]);
+  try {
+    return await runFfmpeg(videoFilters);
+  } catch (err) {
+    if (subtitleFilters.length && shouldRetryWithoutSubtitles(err)) {
+      console.warn("[video] Subtitles filter failed. Retrying without subtitles.");
+      return runFfmpeg(baseFilters);
     }
-
-    command
-      .output(outputPath)
-      .on("error", (err) => reject(err))
-      .on("end", () => resolve(outputPath))
-      .run();
-  });
+    throw err;
+  }
 }
 
 export { getMediaDuration };
