@@ -1,12 +1,28 @@
+import fs from "fs";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
 import path from "path";
 
-const ffmpegPath = typeof ffmpegStatic === "string" ? ffmpegStatic : ffmpegStatic.path;
-const ffprobePath = typeof ffprobeStatic === "string" ? ffprobeStatic : ffprobeStatic.path;
-ffmpeg.setFfmpegPath(ffmpegPath);
-ffmpeg.setFfprobePath(ffprobePath);
+function resolveBinaryPath(envKey, fallbackPath) {
+  const envPath = process.env[envKey];
+  if (envPath && fs.existsSync(envPath)) return envPath;
+  if (fallbackPath && fs.existsSync(fallbackPath)) return fallbackPath;
+  return "";
+}
+
+const systemFfmpeg = resolveBinaryPath(
+  "FFMPEG_PATH",
+  process.platform === "win32" ? "" : "/usr/bin/ffmpeg"
+);
+const systemFfprobe = resolveBinaryPath(
+  "FFPROBE_PATH",
+  process.platform === "win32" ? "" : "/usr/bin/ffprobe"
+);
+const ffmpegPath = systemFfmpeg || (typeof ffmpegStatic === "string" ? ffmpegStatic : ffmpegStatic.path);
+const ffprobePath = systemFfprobe || (typeof ffprobeStatic === "string" ? ffprobeStatic : ffprobeStatic.path);
+if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
+if (ffprobePath) ffmpeg.setFfprobePath(ffprobePath);
 
 function sanitizeTitle(title) {
   return title ? title.replace(/[^a-zA-Z0-9-_ ]/g, "").trim().replace(/\s+/g, "-") : `short-${Date.now()}`;
