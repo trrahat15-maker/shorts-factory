@@ -54,6 +54,17 @@ function parseCsv(raw) {
     .filter(Boolean);
 }
 
+function buildTitleFromScript(script) {
+  if (!script) return "Daily Motivation";
+  const firstSentence = script.split(/(?<=[.?!])\s+/)[0] || script;
+  let title = firstSentence.replace(/["']/g, "").trim();
+  if (!title) return "Daily Motivation";
+  if (title.length > 90) {
+    title = `${title.slice(0, 87).trim()}...`;
+  }
+  return title;
+}
+
 function isRateLimitError(err) {
   return err?.status === 429 || err?.code === 429 || err?.error?.code === 429;
 }
@@ -201,12 +212,12 @@ async function run() {
   const voice = getEnv("ELEVENLABS_VOICE", "alloy").trim();
   const maxDuration = Number(getEnv("MAX_DURATION", "0")) || 0;
 
-  const title = getEnv("VIDEO_TITLE", "Daily Motivation").trim();
+  let title = getEnv("VIDEO_TITLE", "").trim();
   const description = getEnv(
     "VIDEO_DESCRIPTION",
     "Daily motivational shorts.\n\nSubscribe for more success mindset content.\n\n#motivation #success #discipline"
   );
-  const tags = getEnv("VIDEO_TAGS", "motivation,success,discipline")
+  const tags = getEnv("VIDEO_TAGS", "motivation,success,discipline,shorts")
     .split(",")
     .map((tag) => tag.trim())
     .filter(Boolean);
@@ -256,6 +267,12 @@ async function run() {
     if (!script && lastError) {
       throw lastError;
     }
+
+    if (!title) {
+      title = buildTitleFromScript(script);
+    }
+    log(`Using title: ${title}`);
+    log(`Using tags: ${tags.join(", ") || "none"}`);
 
     log("Generating voice");
     const voiceResult = await generateVoice({
