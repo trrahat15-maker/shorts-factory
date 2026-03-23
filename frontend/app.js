@@ -374,13 +374,15 @@ async function refreshHistory() {
     (data.history || []).slice(0, 25).forEach((item) => {
       const li = document.createElement("li");
       const when = new Date(item.createdAt).toLocaleString();
-      const download = document.createElement("a");
-      download.textContent = "Download";
-      download.href = `/uploads/generated/${item.file}`;
-      download.setAttribute("download", "");
-      download.className = "button";
       li.innerHTML = `<strong>${item.title}</strong> <small>${when}</small> <span>${item.status}</span> `;
-      li.appendChild(download);
+      if (item.file) {
+        const download = document.createElement("a");
+        download.textContent = "Download";
+        download.href = `/api/files/generated/${item.file}`;
+        download.setAttribute("download", "");
+        download.className = "button";
+        li.appendChild(download);
+      }
       list.appendChild(li);
     });
   } catch (err) {

@@ -54,6 +54,24 @@ Then open the Replit preview or go to `http://localhost:3000`.
 - Auto metadata can be toggled in **Settings** and uses your script to generate titles, descriptions, and tags.
 - For extra security, set an **App Access Token** in Settings. The backend will require `x-app-token` for API calls.
 
+## Permanent Storage (Optional)
+
+By default, uploads are stored on the server filesystem. On free hosts (Replit/Render), this storage is temporary.
+To make storage permanent, use S3-compatible storage (R2, Supabase Storage, Backblaze, AWS S3).
+
+Add these environment variables on your server:
+
+- `STORAGE_DRIVER=s3`
+- `S3_BUCKET=your-bucket`
+- `S3_REGION=auto` (or your region)
+- `S3_ENDPOINT=https://your-s3-endpoint` (required for R2/Supabase)
+- `S3_ACCESS_KEY=...`
+- `S3_SECRET_KEY=...`
+
+To delete generated videos after successful upload:
+
+- `AUTO_DELETE_AFTER_UPLOAD=true` (default)
+
 ## Mobile App (Expo)
 
 The React Native (Expo) app lives in `mobile/` and connects to the Replit backend.

@@ -16,6 +16,14 @@ import {
   uploadToYoutube,
 } from "./src/youtube.js";
 import {
+  ensureLocalDirs,
+  storeFile,
+  listFiles,
+  getLocalPath,
+  streamFile,
+  deleteFile,
+} from "./src/objectStore.js";
+import {
   ensureStorage,
   listHistory,
   appendHistory,
@@ -29,14 +37,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const UPLOAD_DIR = path.join(__dirname, "uploads");
-const BASE_VIDEOS_DIR = path.join(UPLOAD_DIR, "base-videos");
+const TEMP_DIR = path.join(UPLOAD_DIR, "tmp");
+const WORK_DIR = path.join(UPLOAD_DIR, "work");
 const GENERATED_DIR = path.join(UPLOAD_DIR, "generated");
-const MUSIC_DIR = path.join(UPLOAD_DIR, "music");
 
 await ensureStorage(UPLOAD_DIR);
-await ensureStorage(BASE_VIDEOS_DIR);
 await ensureStorage(GENERATED_DIR);
-await ensureStorage(MUSIC_DIR);
+await ensureStorage(TEMP_DIR);
+await ensureStorage(WORK_DIR);
+await ensureLocalDirs();
 
 const app = express();
 app.use(cors());
@@ -62,8 +71,8 @@ app.use("/api", async (req, res, next) => {
   return next();
 });
 
-const baseUpload = multer({ dest: BASE_VIDEOS_DIR });
-const musicUpload = multer({ dest: MUSIC_DIR });
+const baseUpload = multer({ dest: TEMP_DIR });
+const musicUpload = multer({ dest: TEMP_DIR });
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
@@ -134,17 +143,23 @@ app.post("/api/voice", async (req, res) => {
 
 app.post("/api/base/upload", baseUpload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-  const existing = await fs.readdir(BASE_VIDEOS_DIR);
+  const existing = await listFiles("base");
   if (existing.length > 3) {
     await fs.unlink(req.file.path);
     return res.status(400).json({ error: "Base video limit reached (max 3)." });
   }
-  res.json({ file: req.file.filename, url: `/uploads/base-videos/${req.file.filename}` });
+  const stored = await storeFile({
+    type: "base",
+    localPath: req.file.path,
+    filename: req.file.originalname || req.file.filename,
+    contentType: req.file.mimetype,
+  });
+  res.json({ file: stored.key, url: `/api/files/base/${stored.key}` });
 });
 
 app.get("/api/base/list", async (req, res) => {
   try {
-    const files = await fs.readdir(BASE_VIDEOS_DIR);
+    const files = await listFiles("base");
     res.json({ videos: files });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -153,12 +168,19 @@ app.get("/api/base/list", async (req, res) => {
 
 app.post("/api/music/upload", musicUpload.single("file"), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-  res.json({ file: req.file.filename, url: `/uploads/music/${req.file.filename}` });
+  storeFile({
+    type: "music",
+    localPath: req.file.path,
+    filename: req.file.originalname || req.file.filename,
+    contentType: req.file.mimetype,
+  })
+    .then((stored) => res.json({ file: stored.key, url: `/api/files/music/${stored.key}` }))
+    .catch((err) => res.status(500).json({ error: err.message }));
 });
 
 app.get("/api/music/list", async (req, res) => {
   try {
-    const files = await fs.readdir(MUSIC_DIR);
+    const files = await listFiles("music");
     res.json({ tracks: files });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -174,31 +196,50 @@ app.post("/api/video", async (req, res) => {
     const safeVoice = path.basename(voiceFile);
     const safeMusic = musicFile ? path.basename(musicFile) : null;
 
+    const basePath = await getLocalPath("base", safeBase);
+    const musicPath = safeMusic ? await getLocalPath("music", safeMusic) : null;
+
     const output = await generateVideo({
-      baseVideoPath: path.join(BASE_VIDEOS_DIR, safeBase),
+      baseVideoPath: basePath,
       voicePath: path.join(GENERATED_DIR, safeVoice),
       subtitles,
       script,
-      outDir: GENERATED_DIR,
+      outDir: WORK_DIR,
       title,
-      musicPath: safeMusic ? path.join(MUSIC_DIR, safeMusic) : null,
+      musicPath,
       maxDuration,
       subtitleStyle,
       musicVolume,
     });
 
+    const stored = await storeFile({
+      type: "generated",
+      localPath: output,
+      filename: path.basename(output),
+      contentType: "video/mp4",
+    });
+
     const historyItem = {
       id: `${Date.now()}`,
       title: title || "Untitled",
-      file: path.basename(output),
+      file: stored.key,
       createdAt: new Date().toISOString(),
       status: "done",
     };
     await appendHistory(historyItem);
-    res.json({ file: path.basename(output), url: `/uploads/generated/${path.basename(output)}` });
+    res.json({ file: stored.key, url: `/api/files/generated/${stored.key}` });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: error.message || "Failed to generate video" });
+  }
+});
+
+app.get("/api/files/:type/:name", async (req, res) => {
+  try {
+    const { type, name } = req.params;
+    await streamFile(res, type, name);
+  } catch (err) {
+    res.status(404).json({ error: "File not found" });
   }
 });
 
@@ -265,7 +306,7 @@ app.post("/api/youtube/upload", async (req, res) => {
       return res.status(400).json({ error: "Missing accessToken or videoFile" });
     }
     const safeVideo = path.basename(videoFile);
-    const localVideoPath = path.join(GENERATED_DIR, safeVideo);
+    const localVideoPath = await getLocalPath("generated", safeVideo);
     const result = await uploadToYoutube({
       accessToken,
       refreshToken,
@@ -274,6 +315,10 @@ app.post("/api/youtube/upload", async (req, res) => {
       description,
       tags,
     });
+    if ((process.env.AUTO_DELETE_AFTER_UPLOAD || "true").toLowerCase() !== "false") {
+      await deleteFile("generated", safeVideo);
+    }
+    await fs.rm(localVideoPath, { force: true });
     res.json(result);
   } catch (err) {
     console.error(err);
@@ -295,7 +340,7 @@ app.post("/api/automation/run", async (req, res) => {
       promptOverride,
     } = req.body || {};
     const config = await getConfig();
-    const baseVideos = await fs.readdir(BASE_VIDEOS_DIR);
+    const baseVideos = await listFiles("base");
     if (!baseVideos.length) {
       return res.status(400).json({ error: "Upload at least one base video first." });
     }
@@ -310,6 +355,7 @@ app.post("/api/automation/run", async (req, res) => {
     const results = [];
     const count = Number(config.videosPerDay) || 1;
     const useAutoMetadata = config.autoMetadata !== false;
+    const autoDelete = (process.env.AUTO_DELETE_AFTER_UPLOAD || "true").toLowerCase() !== "false";
 
     for (let i = 0; i < count; i += 1) {
       const baseVideo = baseVideos[Math.floor(Math.random() * baseVideos.length)];
@@ -348,27 +394,22 @@ app.post("/api/automation/run", async (req, res) => {
         outDir: GENERATED_DIR,
       });
 
+      const basePath = await getLocalPath("base", baseVideo);
+      const musicPath = musicFile ? await getLocalPath("music", path.basename(musicFile)) : null;
+
       const videoPath = await generateVideo({
-        baseVideoPath: path.join(BASE_VIDEOS_DIR, baseVideo),
+        baseVideoPath: basePath,
         voicePath: path.join(GENERATED_DIR, voiceResult.file),
         script,
-        outDir: GENERATED_DIR,
+        outDir: WORK_DIR,
         title: videoTitle,
-        musicPath: musicFile ? path.join(MUSIC_DIR, path.basename(musicFile)) : null,
+        musicPath,
         maxDuration: maxDuration || config.maxDuration,
         subtitleStyle: config.subtitleStyle,
         musicVolume: config.musicVolume,
       });
 
-      const historyItem = {
-        id: `${Date.now()}-${i}`,
-        title: videoTitle || "Daily Short",
-        file: path.basename(videoPath),
-        createdAt: new Date().toISOString(),
-        status: "done",
-      };
-      await appendHistory(historyItem);
-
+      let storedKey = "";
       let uploadResult = null;
       if (upload && tokens?.access_token) {
         uploadResult = await uploadToYoutube({
@@ -381,10 +422,31 @@ app.post("/api/automation/run", async (req, res) => {
         });
       }
 
+      if (!(upload && autoDelete)) {
+        const stored = await storeFile({
+          type: "generated",
+          localPath: videoPath,
+          filename: path.basename(videoPath),
+          contentType: "video/mp4",
+        });
+        storedKey = stored.key;
+      } else {
+        await fs.rm(videoPath, { force: true });
+      }
+
+      const historyItem = {
+        id: `${Date.now()}-${i}`,
+        title: videoTitle || "Daily Short",
+        file: storedKey,
+        createdAt: new Date().toISOString(),
+        status: uploadResult ? "uploaded" : "done",
+      };
+      await appendHistory(historyItem);
+
       results.push({
         script,
         voiceFile: voiceResult.file,
-        videoFile: path.basename(videoPath),
+        videoFile: storedKey,
         upload: uploadResult,
       });
     }

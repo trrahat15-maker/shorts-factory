@@ -428,7 +428,7 @@ export default function App() {
 
   const handleDownload = async (fileName) => {
     if (!fileName) return;
-    const url = `${apiBase}/uploads/generated/${fileName}`;
+    const url = `${apiBase}/api/files/generated/${fileName}`;
     const localPath = `${FileSystem.cacheDirectory}${fileName}`;
     try {
       const result = await FileSystem.downloadAsync(url, localPath);
@@ -788,7 +788,7 @@ export default function App() {
               <>
                 <View style={styles.videoPreview}>
                   <Video
-                    source={{ uri: `${apiBase}/uploads/generated/${videoFile}` }}
+                    source={{ uri: `${apiBase}/api/files/generated/${videoFile}` }}
                     useNativeControls
                     resizeMode="cover"
                     style={styles.video}
@@ -832,9 +832,11 @@ export default function App() {
             {history.slice(0, 10).map((item) => (
               <View key={item.id} style={styles.historyRow}>
                 <Text style={styles.text}>{item.title}</Text>
-                <Pressable style={styles.link} onPress={() => handleDownload(item.file)}>
-                  <Text style={styles.linkText}>Download</Text>
-                </Pressable>
+                {item.file ? (
+                  <Pressable style={styles.link} onPress={() => handleDownload(item.file)}>
+                    <Text style={styles.linkText}>Download</Text>
+                  </Pressable>
+                ) : null}
               </View>
             ))}
           </View>
