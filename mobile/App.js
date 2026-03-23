@@ -11,6 +11,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -159,11 +160,12 @@ export default function App() {
     await Promise.all([refreshBaseVideos(), refreshMusic(), refreshHistory(), checkYoutube()]);
   };
 
-  const apiFetch = async (path, options = {}) => {
+  const apiFetch = async (path, options = {}, tokenOverride) => {
     if (!apiBase) throw new Error("Set backend URL in Settings.");
     const headers = new Headers(options.headers || {});
-    if (config.appAccessToken) {
-      headers.set("x-app-token", config.appAccessToken);
+    const token = tokenOverride || config.appAccessToken;
+    if (token) {
+      headers.set("x-app-token", token);
     }
     const res = await fetch(`${apiBase}${path}`, { ...options, headers });
     if (!res.ok) {
@@ -185,11 +187,15 @@ export default function App() {
     await AsyncStorage.setItem(STORAGE_CONFIG, JSON.stringify(clean));
     if (clean.backendUrl) {
       try {
-        await apiFetch("/api/config", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(clean),
-        });
+        await apiFetch(
+          "/api/config",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(clean),
+          },
+          clean.appAccessToken
+        );
       } catch (err) {
         console.error(err);
       }
@@ -437,6 +443,10 @@ export default function App() {
   };
 
   const handleConnectYoutube = async () => {
+    if (!apiBase) {
+      setStatus("Set backend URL in Settings first.");
+      return;
+    }
     try {
       const data = await apiFetch("/api/youtube/auth-url");
       if (data.url) {
@@ -609,10 +619,11 @@ export default function App() {
     <SafeAreaView style={styles.safe}>
       <StatusBar style="dark" />
       <View style={styles.header}>
+        <Image source={require("./assets/logo.png")} style={styles.logo} />
         <Text style={styles.title}>Shorts Factory Daily</Text>
         <Text style={styles.subtitle}>Mobile Studio for Daily Shorts</Text>
       </View>
-      {renderTabs()}
+      {hasBackend && hasAppToken ? renderTabs() : null}
       <ScrollView contentContainerStyle={styles.container}>
         {loading && (
           <View style={styles.loadingRow}>
@@ -621,6 +632,49 @@ export default function App() {
           </View>
         )}
         {!loading && status ? <Text style={styles.status}>{status}</Text> : null}
+
+        {!hasBackend || !hasAppToken ? (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Quick Setup</Text>
+            <Text style={styles.text}>Set these once to unlock the app.</Text>
+            <Text style={styles.label}>Backend URL (Replit)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="https://your-repl.replit.app"
+              value={config.backendUrl}
+              onChangeText={(value) => setConfig({ ...config, backendUrl: value })}
+            />
+            <Text style={styles.note}>Must be a public HTTPS URL so your phone can reach it.</Text>
+            <Text style={styles.label}>App Access Token</Text>
+            <TextInput
+              style={styles.input}
+              secureTextEntry
+              value={config.appAccessToken}
+              onChangeText={(value) => setConfig({ ...config, appAccessToken: value })}
+            />
+            <Text style={styles.label}>OpenAI API Key</Text>
+            <TextInput
+              style={styles.input}
+              secureTextEntry
+              value={openaiKey}
+              onChangeText={setOpenaiKey}
+            />
+            <Text style={styles.label}>ElevenLabs API Key</Text>
+            <TextInput
+              style={styles.input}
+              secureTextEntry
+              value={elevenLabsKey}
+              onChangeText={setElevenLabsKey}
+            />
+            <Pressable style={styles.button} onPress={async () => {
+              await saveConfig();
+              await saveSecrets();
+              await refreshAll();
+            }}>
+              <Text style={styles.buttonText}>Save & Continue</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         {activeTab === "home" && (
           <View style={styles.card}>
@@ -1021,6 +1075,7 @@ export default function App() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#fff5ec" },
   header: { padding: 20 },
+  logo: { width: 56, height: 56, marginBottom: 6, alignSelf: "center" },
   title: { fontSize: 22, fontWeight: "700", color: "#1e1b16" },
   subtitle: { color: "#6a5f55" },
   container: { padding: 16, paddingBottom: 40 },
