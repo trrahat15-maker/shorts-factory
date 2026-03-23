@@ -34,7 +34,11 @@ function showTab(name) {
 }
 
 async function api(path, options = {}) {
-  const res = await fetch(path, options);
+  const headers = new Headers(options.headers || {});
+  if (state.config.appAccessToken) {
+    headers.set("x-app-token", state.config.appAccessToken);
+  }
+  const res = await fetch(path, { ...options, headers });
   if (!res.ok) {
     const body = await res.text();
     throw new Error(body || res.statusText);
@@ -135,6 +139,7 @@ function normalizeConfig(config = {}) {
     autoMetadata: config.autoMetadata !== false,
     channelContext: config.channelContext || "motivational shorts",
     analysisVideoCount: Number(config.analysisVideoCount) || 30,
+    appAccessToken: config.appAccessToken || "",
     maxDuration: Number(config.maxDuration) || 0,
     subtitleStyle: {
       fontSize: Number(config.subtitleStyle?.fontSize) || 64,
@@ -161,6 +166,8 @@ function applyConfigToUI(config) {
   $("#upload-time").value = config.uploadTime;
   $("#openai-model").value = config.openaiModel;
   $("#openai-base").value = config.openaiBaseUrl;
+  const appToken = $("#app-token");
+  if (appToken) appToken.value = config.appAccessToken || "";
   $("#default-max-duration").value = config.maxDuration || 0;
   $("#max-duration").value = config.maxDuration || 0;
   $("#subtitle-size").value = config.subtitleStyle?.fontSize || 64;
@@ -205,6 +212,7 @@ async function saveConfig() {
     autoMetadata: $("#auto-metadata")?.checked ?? true,
     channelContext: $("#channel-context")?.value?.trim() || "motivational shorts",
     analysisVideoCount: Number($("#analysis-video-count")?.value) || 30,
+    appAccessToken: $("#app-token")?.value?.trim() || "",
     maxDuration: Number($("#default-max-duration").value) || 0,
     subtitleStyle: {
       fontSize: Number($("#subtitle-size").value) || 64,

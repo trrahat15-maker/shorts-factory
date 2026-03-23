@@ -52,6 +52,7 @@ Then open the Replit preview or go to `http://localhost:3000`.
 - Replit may sleep after inactivity; automation runs only while the app is open.
 - Base videos are automatically cropped to 9:16 and looped to match narration length.
 - Auto metadata can be toggled in **Settings** and uses your script to generate titles, descriptions, and tags.
+- For extra security, set an **App Access Token** in Settings. The backend will require `x-app-token` for API calls.
 
 ## Mobile App (Expo)
 

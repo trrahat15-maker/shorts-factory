@@ -44,6 +44,24 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "frontend")));
 
+app.use("/api", async (req, res, next) => {
+  const bypass =
+    req.path === "/health" ||
+    req.path === "/youtube/callback" ||
+    (req.path === "/config" && req.method === "GET");
+  if (bypass) return next();
+
+  const config = await getConfig();
+  const token = (config.appAccessToken || "").trim();
+  if (!token) return next();
+
+  const provided = req.headers["x-app-token"];
+  if (provided !== token) {
+    return res.status(401).json({ error: "Unauthorized. Invalid access token." });
+  }
+  return next();
+});
+
 const baseUpload = multer({ dest: BASE_VIDEOS_DIR });
 const musicUpload = multer({ dest: MUSIC_DIR });
 

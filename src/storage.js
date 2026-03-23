@@ -32,6 +32,7 @@ export async function ensureStorage(...paths) {
       autoMetadata: true,
       channelContext: "motivational shorts",
       analysisVideoCount: 30,
+      appAccessToken: "",
       musicVolume: 0.18,
       maxDuration: 0,
       subtitleStyle: {

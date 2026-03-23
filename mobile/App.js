@@ -43,6 +43,7 @@ const DEFAULT_CONFIG = {
   autoMetadata: true,
   channelContext: "motivational shorts",
   analysisVideoCount: 30,
+  appAccessToken: "",
   maxDuration: 0,
   subtitleStyle: { fontSize: 64, outline: 4 },
   defaultMusic: "",
@@ -64,6 +65,7 @@ const normalizeConfig = (config) => ({
   autoMetadata: config?.autoMetadata !== false,
   channelContext: config?.channelContext || DEFAULT_CONFIG.channelContext,
   analysisVideoCount: Number(config?.analysisVideoCount) || DEFAULT_CONFIG.analysisVideoCount,
+  appAccessToken: config?.appAccessToken || "",
   defaultTags: Array.isArray(config?.defaultTags) ? config.defaultTags : DEFAULT_CONFIG.defaultTags,
   subtitleStyle: {
     fontSize: Number(config?.subtitleStyle?.fontSize) || DEFAULT_CONFIG.subtitleStyle.fontSize,
@@ -154,7 +156,11 @@ export default function App() {
 
   const apiFetch = async (path, options = {}) => {
     if (!apiBase) throw new Error("Set backend URL in Settings.");
-    const res = await fetch(`${apiBase}${path}`, options);
+    const headers = new Headers(options.headers || {});
+    if (config.appAccessToken) {
+      headers.set("x-app-token", config.appAccessToken);
+    }
+    const res = await fetch(`${apiBase}${path}`, { ...options, headers });
     if (!res.ok) {
       const body = await res.text();
       throw new Error(body || res.statusText);
@@ -571,7 +577,11 @@ export default function App() {
   };
 
   const renderTabs = () => (
-    <View style={styles.tabRow}>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.tabRow}
+    >
       {TAB_LIST.map((tab) => (
         <Pressable
           key={tab.key}
@@ -581,7 +591,7 @@ export default function App() {
           <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}>{tab.label}</Text>
         </Pressable>
       ))}
-    </View>
+    </ScrollView>
   );
 
   return (
@@ -609,6 +619,9 @@ export default function App() {
             <Text style={styles.text}>3. Create your short and upload to YouTube.</Text>
             <Pressable style={styles.button} onPress={refreshAll}>
               <Text style={styles.buttonText}>Refresh Status</Text>
+            </Pressable>
+            <Pressable style={styles.secondaryButton} onPress={() => setActiveTab("settings")}>
+              <Text style={styles.secondaryText}>Open Settings</Text>
             </Pressable>
             <Text style={styles.text}>YouTube: {youtubeStatus}</Text>
           </View>
@@ -842,6 +855,13 @@ export default function App() {
               style={styles.input}
               value={config.openaiBaseUrl}
               onChangeText={(value) => setConfig({ ...config, openaiBaseUrl: value })}
+            />
+            <Text style={styles.label}>App Access Token (optional)</Text>
+            <TextInput
+              style={styles.input}
+              secureTextEntry
+              value={config.appAccessToken}
+              onChangeText={(value) => setConfig({ ...config, appAccessToken: value })}
             />
             <View style={styles.rowBetween}>
               <Text style={styles.text}>Auto-generate title/tags</Text>
