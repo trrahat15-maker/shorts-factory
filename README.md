@@ -137,13 +137,17 @@ Optional overrides:
 - `BASE_VIDEO_URLS` (comma separated URLs)
 - `MUSIC_URLS` (comma separated URLs)
 
+Optional analysis secrets (for manual run):
+- `CHANNEL_ID`
+- `ANALYSIS_VIDEO_COUNT`
+
 ### 3) Enable the workflow
 
 The workflow file is:
 
 `.github/workflows/daily-upload.yml`
 
-It runs every day at **10:00 UTC**. You can change the cron schedule there.
+It runs every day at **09:00 UTC** and **21:00 UTC** by default (two uploads per day). You can change the cron schedule there.
 
 ### 4) How it works
 

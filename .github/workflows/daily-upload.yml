@@ -2,7 +2,8 @@ name: Daily Upload
 
 on:
   schedule:
-    - cron: "0 10 * * *"
+    - cron: "0 9 * * *"
+    - cron: "0 21 * * *"
   workflow_dispatch:
 
 jobs:
@@ -35,6 +36,9 @@ jobs:
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          OPENAI_MODEL_LIST: ${{ secrets.OPENAI_MODEL_LIST }}
+          OPENAI_MODEL_ATTEMPTS: ${{ secrets.OPENAI_MODEL_ATTEMPTS }}
+          OPENAI_RETRY_DELAYS: ${{ secrets.OPENAI_RETRY_DELAYS }}
           ELEVENLABS_VOICE: ${{ secrets.ELEVENLABS_VOICE }}
           VIDEO_TITLE: ${{ secrets.VIDEO_TITLE }}
           VIDEO_DESCRIPTION: ${{ secrets.VIDEO_DESCRIPTION }}
@@ -42,3 +46,40 @@ jobs:
           MAX_DURATION: ${{ secrets.MAX_DURATION }}
           BASE_VIDEO_URLS: ${{ secrets.BASE_VIDEO_URLS }}
           MUSIC_URLS: ${{ secrets.MUSIC_URLS }}
+
+  analyze:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run channel analysis
+        run: node scripts/analyzeChannel.js
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+          CHANNEL_CONTEXT: ${{ secrets.CHANNEL_CONTEXT }}
+          ANALYSIS_VIDEO_COUNT: ${{ secrets.ANALYSIS_VIDEO_COUNT }}
+          ANALYSIS_OUTPUT: analysis.md
+
+      - name: Upload analysis report
+        uses: actions/upload-artifact@v4
+        with:
+          name: channel-analysis
+          path: analysis.md
