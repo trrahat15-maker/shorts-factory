@@ -69,12 +69,22 @@ app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 app.get("/api/config", async (req, res) => {
   const config = await getConfig();
-  res.json(config);
+  const safeConfig = { ...config };
+  delete safeConfig.appAccessToken;
+  res.json(safeConfig);
 });
 
 app.post("/api/config", async (req, res) => {
   const config = req.body || {};
-  await setConfig(config);
+  const existing = await getConfig();
+  const existingToken = (existing.appAccessToken || "").trim();
+  if (existingToken) {
+    const provided = req.headers["x-app-token"];
+    if (provided !== existingToken) {
+      return res.status(401).json({ error: "Unauthorized. Invalid access token." });
+    }
+  }
+  await setConfig({ ...existing, ...config });
   res.json({ ok: true });
 });
 

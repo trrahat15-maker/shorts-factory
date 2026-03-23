@@ -40,6 +40,9 @@ async function api(path, options = {}) {
   }
   const res = await fetch(path, { ...options, headers });
   if (!res.ok) {
+    if (res.status === 401) {
+      setStatus("#home-status", "App locked. Enter your App Access Token in Settings.");
+    }
     const body = await res.text();
     throw new Error(body || res.statusText);
   }
@@ -212,7 +215,7 @@ async function saveConfig() {
     autoMetadata: $("#auto-metadata")?.checked ?? true,
     channelContext: $("#channel-context")?.value?.trim() || "motivational shorts",
     analysisVideoCount: Number($("#analysis-video-count")?.value) || 30,
-    appAccessToken: $("#app-token")?.value?.trim() || "",
+    appAccessToken: $("#app-token")?.value?.trim() || state.config.appAccessToken || "",
     maxDuration: Number($("#default-max-duration").value) || 0,
     subtitleStyle: {
       fontSize: Number($("#subtitle-size").value) || 64,

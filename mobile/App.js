@@ -163,13 +163,19 @@ export default function App() {
     const res = await fetch(`${apiBase}${path}`, { ...options, headers });
     if (!res.ok) {
       const body = await res.text();
+      if (res.status === 401) {
+        setStatus("App locked. Enter your App Access Token in Settings.");
+      }
       throw new Error(body || res.statusText);
     }
     return res.json();
   };
 
   const saveConfig = async () => {
-    const clean = normalizeConfig(config);
+    const clean = normalizeConfig({
+      ...config,
+      appAccessToken: config.appAccessToken || DEFAULT_CONFIG.appAccessToken,
+    });
     setConfig(clean);
     await AsyncStorage.setItem(STORAGE_CONFIG, JSON.stringify(clean));
     if (clean.backendUrl) {
