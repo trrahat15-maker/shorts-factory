@@ -78,10 +78,15 @@ export async function generateScript(input, apiKeyFallback) {
   return output;
 }
 
-export async function generateMetadata({ script, channelContext, apiKey, baseUrl, model }) {
+export async function generateMetadata({ script, channelContext, apiKey, baseUrl, model, variants = 3 }) {
+  const titleInstruction =
+    variants && variants > 1
+      ? `Return JSON with keys: titles (array of ${variants} options), description, tags.`
+      : "Return ONLY valid JSON with keys: title, description, tags.";
+
   const prompt = `You are a YouTube Shorts growth assistant.
 Generate metadata for this Shorts script.
-Return ONLY valid JSON with keys: title, description, tags.
+${titleInstruction}
 Constraints:
 - title: <= 90 characters
 - description: 2-3 short sentences + 3-6 hashtags
@@ -112,6 +117,7 @@ ${script}`;
   if (!data) throw new Error("OpenAI metadata was not valid JSON");
 
   const title = String(data.title || "").trim();
+  const titles = Array.isArray(data.titles) ? data.titles : [];
   const description = String(data.description || "").trim();
   const tags = normalizeTags(data.tags);
 
@@ -119,5 +125,6 @@ ${script}`;
     title: title.length > 90 ? `${title.slice(0, 87).trim()}...` : title,
     description,
     tags,
+    titles,
   };
 }

@@ -54,6 +54,44 @@ function parseCsv(raw) {
     .filter(Boolean);
 }
 
+function pickDailyTopic(topics) {
+  if (!topics.length) return "";
+  const today = new Date();
+  const seed = Number(
+    `${today.getUTCFullYear()}${String(today.getUTCMonth() + 1).padStart(2, "0")}${String(
+      today.getUTCDate()
+    ).padStart(2, "0")}`
+  );
+  return topics[seed % topics.length];
+}
+
+function withHashtags(description, hashtags) {
+  if (!description) return hashtags.join(" ");
+  const missing = hashtags.filter((tag) => !description.includes(tag));
+  if (!missing.length) return description;
+  return `${description.trim()}\n\n${missing.join(" ")}`;
+}
+
+function scoreTitle(title) {
+  const len = title.length;
+  let score = 0;
+  if (len >= 30 && len <= 70) score += 2;
+  if (/\d/.test(title)) score += 1;
+  if (/(how|why|stop|start|secret|simple|power|discipline|success|win|focus)/i.test(title)) {
+    score += 1;
+  }
+  if (/[!?]/.test(title)) score += 1;
+  return score;
+}
+
+function pickBestTitle(titles) {
+  if (!Array.isArray(titles) || titles.length === 0) return "";
+  return titles
+    .map((t) => String(t || "").trim())
+    .filter(Boolean)
+    .sort((a, b) => scoreTitle(b) - scoreTitle(a))[0];
+}
+
 function buildTitleFromScript(script) {
   if (!script) return "Daily Motivation";
   const firstSentence = script.split(/(?<=[.?!])\s+/)[0] || script;
@@ -181,6 +219,10 @@ async function run() {
     "PROMPT",
     "Write a 30 second motivational speech for YouTube Shorts. Hook the viewer in the first sentence. Use simple powerful language."
   );
+  const language = getEnv("SCRIPT_LANGUAGE", "English").trim();
+  const topics = parseCsv(getEnv("TOPIC_LIST", ""));
+  const dailyTopic = pickDailyTopic(topics);
+  const topicLine = dailyTopic ? `Topic: ${dailyTopic}` : "";
 
   let openaiModel = getEnv("OPENAI_MODEL", "").trim();
   let openaiBaseUrl = getEnv("OPENAI_BASE_URL", "").trim();
@@ -223,6 +265,8 @@ async function run() {
   let tags = tagsOverride;
   const channelContext = getEnv("CHANNEL_CONTEXT", "").trim();
   const useAiMetadata = getEnv("AUTO_METADATA", "true").toLowerCase() !== "false";
+  const titleVariants = Number(getEnv("TITLE_VARIANTS", "3")) || 3;
+  const extraHashtags = parseCsv(getEnv("HASHTAGS", "#shorts,#motivation,#success"));
 
   let voiceFile = "";
   let videoPath = "";
@@ -241,8 +285,16 @@ async function run() {
       for (let attempt = 1; attempt <= maxAttemptsPerModel; attempt += 1) {
         try {
           log(`Script attempt ${attempt} using model: ${model}`);
+          const finalPrompt = [
+            `${prompt}\n\nLanguage: ${language}.`,
+            "Include a clear call-to-action in the last sentence.",
+            topicLine,
+          ]
+            .filter(Boolean)
+            .join("\n");
+
           script = await generateScript({
-            prompt,
+            prompt: finalPrompt,
             apiKey: getEnv("OPENAI_API_KEY").trim(),
             baseUrl: openaiBaseUrl,
             model,
@@ -283,8 +335,11 @@ async function run() {
           apiKey: getEnv("OPENAI_API_KEY").trim(),
           baseUrl: openaiBaseUrl,
           model: usedModel,
+          variants: titleVariants,
         });
-        if (!titleOverride && metadata.title) title = metadata.title;
+        if (!titleOverride) {
+          title = metadata.title || pickBestTitle(metadata.titles || []);
+        }
         if (!descriptionOverride && metadata.description) description = metadata.description;
         if (!tagsOverride.length && metadata.tags?.length) tags = metadata.tags;
       } catch (err) {
@@ -300,6 +355,12 @@ async function run() {
     }
     if (!tags.length) {
       tags = defaultTags;
+    }
+    if (extraHashtags.length) {
+      description = withHashtags(description, extraHashtags);
+    }
+    if (!tags.includes("shorts")) {
+      tags = [...tags, "shorts"];
     }
     log(`Using title: ${title}`);
     log(`Using tags: ${tags.join(", ") || "none"}`);
