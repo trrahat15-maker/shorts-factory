@@ -113,6 +113,11 @@ export default function App() {
   const [analysisChannelContext, setAnalysisChannelContext] = useState("");
 
   const apiBase = useApiBase(config);
+  const hasBackend = Boolean(config.backendUrl);
+  const hasAppToken = Boolean(config.appAccessToken);
+  const hasOpenai = Boolean(openaiKey);
+  const hasEleven = Boolean(elevenLabsKey);
+  const youtubeConnected = youtubeStatus === "Connected";
 
   useEffect(() => {
     (async () => {
@@ -629,6 +634,12 @@ export default function App() {
             <Pressable style={styles.secondaryButton} onPress={() => setActiveTab("settings")}>
               <Text style={styles.secondaryText}>Open Settings</Text>
             </Pressable>
+            <Text style={styles.cardTitle}>Setup Checklist</Text>
+            <Text style={styles.text}>{hasBackend ? "✅" : "⚠️"} Backend URL set</Text>
+            <Text style={styles.text}>{hasAppToken ? "✅" : "⚠️"} App Access Token set</Text>
+            <Text style={styles.text}>{hasOpenai ? "✅" : "⚠️"} OpenAI key saved</Text>
+            <Text style={styles.text}>{hasEleven ? "✅" : "⚠️"} ElevenLabs key saved</Text>
+            <Text style={styles.text}>{youtubeConnected ? "✅" : "⚠️"} YouTube connected</Text>
             <Text style={styles.text}>YouTube: {youtubeStatus}</Text>
           </View>
         )}
@@ -836,6 +847,9 @@ export default function App() {
               value={config.backendUrl}
               onChangeText={(value) => setConfig({ ...config, backendUrl: value })}
             />
+            <Text style={styles.note}>
+              This must be a public HTTPS URL so your phone can reach it.
+            </Text>
             <Text style={styles.label}>OpenAI API Key</Text>
             <TextInput
               style={styles.input}
@@ -1037,6 +1051,7 @@ const styles = StyleSheet.create({
   cardTitle: { fontWeight: "700", fontSize: 16, marginBottom: 8, color: "#1e1b16" },
   text: { color: "#1e1b16", marginBottom: 6 },
   status: { color: "#6a5f55", marginBottom: 8 },
+  note: { color: "#6a5f55", fontSize: 12, marginBottom: 8 },
   report: {
     color: "#1e1b16",
     backgroundColor: "#fff3e3",
