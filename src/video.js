@@ -338,7 +338,7 @@ async function renderSceneVideo({
   addGradient = true,
   applyEffects = true,
 }) {
-  const runRender = (withGradient) =>
+  const runRender = (withGradient, withEffects) =>
     new Promise((resolve, reject) => {
       const command = ffmpeg();
       if (isImage) {
@@ -349,13 +349,13 @@ async function renderSceneVideo({
 
       const sceneFilter = buildSceneFilters({
         addGradient: withGradient,
-        applyEffects,
+        applyEffects: withEffects,
         isImage,
         duration,
       });
 
       command
-        .complexFilter(sceneFilter, "v0")
+        .complexFilter(sceneFilter)
         .outputOptions([
           "-map",
           "[v0]",
@@ -396,7 +396,7 @@ async function renderSceneVideo({
           });
 
           command
-            .complexFilter(sceneFilter, "v0")
+            .complexFilter(sceneFilter)
             .outputOptions([
               "-map",
               "[v0]",
@@ -418,11 +418,15 @@ async function renderSceneVideo({
         });
       }
     }
-    return await runRender(addGradient);
+    return await runRender(addGradient, applyEffects);
   } catch (err) {
     if (addGradient) {
       console.warn("[video] Gradient overlay failed, retrying without gradient.");
-      return runRender(false);
+      return runRender(false, applyEffects);
+    }
+    if (applyEffects) {
+      console.warn("[video] Effect filters failed, retrying without effects.");
+      return runRender(false, false);
     }
     throw err;
   }
