@@ -7,7 +7,7 @@ import { generateMetadata, generateScript } from "../src/openai.js";
 import { generateVoice } from "../src/voice.js";
 import { generateStockBaseVideo, generateVideo, getMediaDuration } from "../src/video.js";
 import { uploadToYoutube } from "../src/youtube.js";
-import { extractKeywords, fetchStockScenes, splitScriptIntoParts } from "../src/stock.js";
+import { extractKeywords, fetchStockScenes, splitScriptIntoParts, loadCachedMedia } from "../src/stock.js";
 
 const log = (message) => console.log(`[auto] ${message}`);
 
@@ -216,6 +216,7 @@ async function run() {
   await fs.mkdir(tempDir, { recursive: true });
 
   const baseDir = path.join(process.cwd(), "base-videos");
+  const userImagesDir = path.join(process.cwd(), "user-images");
   const musicDir = path.join(process.cwd(), "music");
   const tempBaseDir = path.join(tempDir, "base-videos");
   const tempMusicDir = path.join(tempDir, "music");
@@ -275,6 +276,8 @@ async function run() {
   const enableStockVideo = getEnv("ENABLE_STOCK_VIDEO", "true").toLowerCase() !== "false";
   const enableImageMode = getEnv("ENABLE_IMAGE_MODE", "true").toLowerCase() !== "false";
   const pexelsApiKey = getEnv("PEXELS_API_KEY", "").trim();
+  const pixabayApiKey = getEnv("PIXABAY_API_KEY", "").trim();
+  const enforceMix = getEnv("MIX_USER_MEDIA", "true").toLowerCase() !== "false";
 
   const titleOverride = getEnv("VIDEO_TITLE", "").trim();
   const descriptionOverride = getEnv("VIDEO_DESCRIPTION", "").trim();
@@ -400,22 +403,91 @@ async function run() {
     const audioDuration = await getMediaDuration(voicePath);
     let basePath = "";
 
+    const userVideos = downloadedBase.length
+      ? downloadedBase.map((file) => path.basename(file))
+      : await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
+    const userImages = await listMediaFiles(userImagesDir, [".jpg", ".jpeg", ".png", ".webp"]);
+
     if (enableStockVideo) {
-      if (!pexelsApiKey) {
-        throw new Error("ENABLE_STOCK_VIDEO is true but PEXELS_API_KEY is missing.");
+      if (!pexelsApiKey && !pixabayApiKey) {
+        throw new Error("ENABLE_STOCK_VIDEO is true but no stock API key is set (PEXELS_API_KEY or PIXABAY_API_KEY).");
       }
       const parts = splitScriptIntoParts(script);
       log(`Fetching stock visuals for ${parts.length} scenes`);
       const scenes = await fetchStockScenes({
         parts,
         pexelsApiKey,
+        pixabayApiKey,
         enableImages: enableImageMode,
         tempDir: tempStockDir,
       });
+
+      const cached = await loadCachedMedia();
       const usableScenes = scenes.filter((scene) => scene.type !== "empty");
-      if (usableScenes.length) {
+      const stockAvailable = usableScenes.length > 0 || cached.videos.length || cached.images.length;
+      const userAvailable = userVideos.length || userImages.length;
+
+      const pickUserScene = (text) => {
+        if (userVideos.length) {
+          const file = userVideos[Math.floor(Math.random() * userVideos.length)];
+          const filePath = downloadedBase.length ? path.join(tempBaseDir, file) : path.join(baseDir, file);
+          return { type: "video", path: filePath, text, source: "user" };
+        }
+        if (userImages.length) {
+          const shuffled = [...userImages].sort(() => Math.random() - 0.5);
+          const count = Math.min(5, Math.max(3, shuffled.length));
+          const paths = shuffled.slice(0, count).map((file) => path.join(userImagesDir, file));
+          return { type: "images", paths, text, source: "user" };
+        }
+        return null;
+      };
+
+      const pickStockScene = (index, text) => {
+        if (usableScenes[index]) {
+          return { ...usableScenes[index], text };
+        }
+        if (usableScenes.length) {
+          const scene = usableScenes[Math.floor(Math.random() * usableScenes.length)];
+          return { ...scene, text };
+        }
+        if (cached.videos.length) {
+          const file = cached.videos[Math.floor(Math.random() * cached.videos.length)];
+          return { type: "video", path: file, text, source: "cache" };
+        }
+        if (cached.images.length) {
+          const shuffled = [...cached.images].sort(() => Math.random() - 0.5);
+          const count = Math.min(5, Math.max(3, shuffled.length));
+          return { type: "images", paths: shuffled.slice(0, count), text, source: "cache" };
+        }
+        return null;
+      };
+
+      const mixedScenes = parts.map((part, index) => {
+        const preferUser = enforceMix && userAvailable && stockAvailable ? index % 2 === 1 : userAvailable && !stockAvailable;
+        const scene = preferUser ? pickUserScene(part.text) || pickStockScene(index, part.text) : pickStockScene(index, part.text) || pickUserScene(part.text);
+        return scene || { type: "empty", text: part.text };
+      });
+
+      // Ensure at least one user and one stock scene when both are available.
+      if (enforceMix && userAvailable && stockAvailable) {
+        const usedUser = mixedScenes.some((scene) => scene?.source === "user");
+        const usedStock = mixedScenes.some((scene) => scene?.source === "stock" || scene?.source === "cache");
+        if (!usedUser) {
+          const idx = Math.floor(Math.random() * mixedScenes.length);
+          const replacement = pickUserScene(mixedScenes[idx]?.text || script);
+          if (replacement) mixedScenes[idx] = replacement;
+        }
+        if (!usedStock) {
+          const idx = Math.floor(Math.random() * mixedScenes.length);
+          const replacement = pickStockScene(idx, mixedScenes[idx]?.text || script);
+          if (replacement) mixedScenes[idx] = replacement;
+        }
+      }
+
+      const usableMixed = mixedScenes.filter((scene) => scene?.type !== "empty");
+      if (usableMixed.length) {
         basePath = await generateStockBaseVideo({
-          scenes: usableScenes,
+          scenes: usableMixed,
           outDir: tempDir,
           totalDuration: audioDuration || 30,
         });
@@ -425,13 +497,10 @@ async function run() {
     }
 
     if (!basePath) {
-      const baseVideos = downloadedBase.length
-        ? downloadedBase.map((file) => path.basename(file))
-        : await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
-      if (!baseVideos.length) {
+      if (!userVideos.length) {
         throw new Error("No base videos found. Add files to /base-videos or enable stock visuals.");
       }
-      const baseVideo = baseVideos[Math.floor(Math.random() * baseVideos.length)];
+      const baseVideo = userVideos[Math.floor(Math.random() * userVideos.length)];
       basePath = downloadedBase.length ? path.join(tempBaseDir, baseVideo) : path.join(baseDir, baseVideo);
     }
 
@@ -449,6 +518,7 @@ async function run() {
       fontColor: "white",
       highlightColor: pickRandom(["yellow", "cyan", "lime"], "yellow"),
     };
+    const hookText = (script.split(/(?<=[.?!])\s+/)[0] || script).split(" ").slice(0, 10).join(" ").trim();
 
     videoPath = await generateVideo({
       baseVideoPath: basePath,
@@ -461,6 +531,7 @@ async function run() {
       subtitleMode,
       highlightWords,
       subtitleStyle,
+      hookText,
     });
   } catch (err) {
     log(`Video generation failed: ${err.message}`);

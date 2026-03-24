@@ -42,8 +42,10 @@ jobs:
           OPENAI_MODEL_ATTEMPTS: ${{ secrets.OPENAI_MODEL_ATTEMPTS }}
           OPENAI_RETRY_DELAYS: ${{ secrets.OPENAI_RETRY_DELAYS }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           ENABLE_STOCK_VIDEO: ${{ secrets.ENABLE_STOCK_VIDEO }}
           ENABLE_IMAGE_MODE: ${{ secrets.ENABLE_IMAGE_MODE }}
+          MIX_USER_MEDIA: ${{ secrets.MIX_USER_MEDIA }}
           SUBTITLE_MODE: ${{ secrets.SUBTITLE_MODE }}
           SUBTITLE_HIGHLIGHT: ${{ secrets.SUBTITLE_HIGHLIGHT }}
           ELEVENLABS_VOICE: ${{ secrets.ELEVENLABS_VOICE }}

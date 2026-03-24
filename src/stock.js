@@ -1,4 +1,5 @@
 import fs from "fs/promises";
+import { existsSync } from "fs";
 import path from "path";
 
 const STOPWORDS = new Set([
@@ -185,9 +186,77 @@ export async function fetchPexelsImages(query, apiKey) {
     .filter(Boolean);
 }
 
-export async function fetchStockScenes({ parts, pexelsApiKey, enableImages, tempDir }) {
+async function fetchPixabayJson(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Pixabay API error ${response.status}: ${body}`);
+  }
+  return response.json();
+}
+
+export async function fetchPixabayVideo(query, apiKey) {
+  const url = `https://pixabay.com/api/videos/?key=${encodeURIComponent(apiKey)}&q=${encodeURIComponent(
+    query
+  )}&orientation=vertical&per_page=5`;
+  const data = await fetchPixabayJson(url);
+  const hits = Array.isArray(data?.hits) ? data.hits : [];
+  if (!hits.length) return null;
+  const chosen = hits[Math.floor(Math.random() * hits.length)];
+  const video = chosen?.videos?.large || chosen?.videos?.medium || chosen?.videos?.small;
+  return video?.url || null;
+}
+
+export async function fetchPixabayImages(query, apiKey) {
+  const url = `https://pixabay.com/api/?key=${encodeURIComponent(apiKey)}&q=${encodeURIComponent(
+    query
+  )}&orientation=vertical&per_page=6`;
+  const data = await fetchPixabayJson(url);
+  const hits = Array.isArray(data?.hits) ? data.hits : [];
+  return hits.map((hit) => hit?.largeImageURL || hit?.webformatURL || "").filter(Boolean);
+}
+
+const CACHE_DIR = path.join(process.cwd(), "data", "stock-cache");
+
+async function ensureDir(dir) {
+  await fs.mkdir(dir, { recursive: true });
+}
+
+async function cacheAsset(filePath) {
+  try {
+    await ensureDir(CACHE_DIR);
+    const target = path.join(CACHE_DIR, path.basename(filePath));
+    if (filePath !== target) {
+      await fs.copyFile(filePath, target);
+    }
+  } catch (err) {
+    console.warn(`[stock] Cache copy failed: ${err.message}`);
+  }
+}
+
+export async function loadCachedMedia() {
+  const videos = [];
+  const images = [];
+  if (!existsSync(CACHE_DIR)) return { videos, images };
+  try {
+    const files = await fs.readdir(CACHE_DIR);
+    files.forEach((file) => {
+      const lower = file.toLowerCase();
+      if (lower.endsWith(".mp4") || lower.endsWith(".mov") || lower.endsWith(".webm")) {
+        videos.push(path.join(CACHE_DIR, file));
+      } else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp")) {
+        images.push(path.join(CACHE_DIR, file));
+      }
+    });
+  } catch (err) {
+    console.warn(`[stock] Cache read failed: ${err.message}`);
+  }
+  return { videos, images };
+}
+
+export async function fetchStockScenes({ parts, pexelsApiKey, pixabayApiKey, enableImages, tempDir }) {
   if (!parts.length) return [];
-  await fs.mkdir(tempDir, { recursive: true });
+  await ensureDir(tempDir);
 
   const scenes = [];
   for (let i = 0; i < parts.length; i += 1) {
@@ -203,16 +272,30 @@ export async function fetchStockScenes({ parts, pexelsApiKey, enableImages, temp
         console.warn(`[stock] Pexels video search failed: ${err.message}`);
       }
     }
+    if (!videoUrl && pixabayApiKey) {
+      try {
+        videoUrl = await fetchPixabayVideo(query, pixabayApiKey);
+      } catch (err) {
+        console.warn(`[stock] Pixabay video search failed: ${err.message}`);
+      }
+    }
 
     if (videoUrl) {
       const filePath = await downloadAsset(videoUrl, tempDir, `stock-video-${i + 1}.mp4`);
-      scenes.push({ type: "video", path: filePath, text, keywords });
+      await cacheAsset(filePath);
+      scenes.push({ type: "video", path: filePath, text, keywords, source: "stock" });
       continue;
     }
 
-    if (enableImages && pexelsApiKey) {
+    if (enableImages && (pexelsApiKey || pixabayApiKey)) {
       try {
-        const images = await fetchPexelsImages(query, pexelsApiKey);
+        let images = [];
+        if (pexelsApiKey) {
+          images = await fetchPexelsImages(query, pexelsApiKey);
+        }
+        if (!images.length && pixabayApiKey) {
+          images = await fetchPixabayImages(query, pixabayApiKey);
+        }
         const selected = images.slice(0, 5);
         if (selected.length) {
           const paths = [];
@@ -222,9 +305,10 @@ export async function fetchStockScenes({ parts, pexelsApiKey, enableImages, temp
               tempDir,
               `stock-image-${i + 1}-${j + 1}.jpg`
             );
+            await cacheAsset(imagePath);
             paths.push(imagePath);
           }
-          scenes.push({ type: "images", paths, text, keywords });
+          scenes.push({ type: "images", paths, text, keywords, source: "stock" });
           continue;
         }
       } catch (err) {

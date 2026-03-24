@@ -143,6 +143,16 @@ function buildSubtitleFilters(subtitles, style = {}) {
   });
 }
 
+function buildHookFilter(hookText, style = {}) {
+  if (!hookText) return "";
+  const safeText = escapeDrawtext(hookText);
+  const fontSize = Number(style.hookSize) || 88;
+  const outline = Number(style.hookOutline) || 6;
+  const yPos = Number(style.hookY) || 140;
+  const alpha = "if(lt(t,0.1),0,if(lt(t,2),1,0))";
+  return `drawtext=fontsize=${fontSize}:fontcolor=white:borderw=${outline}:bordercolor=black:x=(w-text_w)/2:y=${yPos}:alpha='${alpha}':text='${safeText}'`;
+}
+
 function shouldRetryWithoutSubtitles(err) {
   const message = `${err?.message || ""} ${err?.stderr || ""}`.toLowerCase();
   return (
@@ -165,6 +175,7 @@ export async function generateVideo({
   subtitleStyle,
   subtitleMode,
   highlightWords,
+  hookText,
 }) {
   const safeTitle = sanitizeTitle(title);
   const outputFileName = `${safeTitle || "short"}-${Date.now()}.mp4`;
@@ -189,6 +200,7 @@ export async function generateVideo({
   }
 
   const subtitleFilters = buildSubtitleFilters(computedSubtitles, subtitleStyle);
+  const hookFilter = buildHookFilter(hookText, subtitleStyle);
   const extraEffectsEnabled = process.env.EXTRA_EFFECTS?.toLowerCase() !== "false";
   const extraFilters = buildExtraEffects({ enabled: extraEffectsEnabled, includeEq: true });
   const baseFilters = [
@@ -196,7 +208,10 @@ export async function generateVideo({
     "crop=1080:1920",
     "setsar=1",
   ];
-  const videoFilters = baseFilters.concat(extraFilters, subtitleFilters);
+  const videoFilters = baseFilters
+    .concat(extraFilters)
+    .concat(subtitleFilters)
+    .concat(hookFilter ? [hookFilter] : []);
 
   const runFfmpeg = (filters) =>
     new Promise((resolve, reject) => {
@@ -454,6 +469,17 @@ export async function generateStockBaseVideo({ scenes, outDir, totalDuration }) 
   const wordCounts = scenes.map((scene) => (scene?.text || "").split(/\s+/).filter(Boolean).length || 1);
   const totalWords = wordCounts.reduce((acc, n) => acc + n, 0) || 1;
 
+  const splitDuration = (duration) => {
+    const segments = [];
+    let remaining = duration;
+    while (remaining > 0.15) {
+      const seg = Math.min(remaining, randomBetween(1.5, 3));
+      segments.push(seg);
+      remaining -= seg;
+    }
+    return segments;
+  };
+
   let remaining = totalDuration || 30;
   for (let i = 0; i < scenes.length; i += 1) {
     const scene = scenes[i];
@@ -462,13 +488,14 @@ export async function generateStockBaseVideo({ scenes, outDir, totalDuration }) 
     remaining = Math.max(0, remaining - duration);
 
     if (scene.type === "images" && Array.isArray(scene.paths) && scene.paths.length) {
-      const perImage = duration / scene.paths.length;
-      for (let j = 0; j < scene.paths.length; j += 1) {
+      const segments = splitDuration(duration);
+      for (let j = 0; j < segments.length; j += 1) {
+        const image = scene.paths[j % scene.paths.length];
         const outPath = path.join(outDir, `scene-${i + 1}-${j + 1}.mp4`);
         // eslint-disable-next-line no-await-in-loop
         await renderSceneVideo({
-          inputPath: scene.paths[j],
-          duration: perImage,
+          inputPath: image,
+          duration: segments[j],
           outPath,
           isImage: true,
           addGradient: true,
@@ -477,17 +504,20 @@ export async function generateStockBaseVideo({ scenes, outDir, totalDuration }) 
         tempScenes.push(outPath);
       }
     } else if (scene.type === "video" && scene.path) {
-      const outPath = path.join(outDir, `scene-${i + 1}.mp4`);
-      // eslint-disable-next-line no-await-in-loop
-      await renderSceneVideo({
-        inputPath: scene.path,
-        duration,
-        outPath,
-        isImage: false,
-        addGradient: true,
-        applyEffects: true,
-      });
-      tempScenes.push(outPath);
+      const segments = splitDuration(duration);
+      for (let j = 0; j < segments.length; j += 1) {
+        const outPath = path.join(outDir, `scene-${i + 1}-${j + 1}.mp4`);
+        // eslint-disable-next-line no-await-in-loop
+        await renderSceneVideo({
+          inputPath: scene.path,
+          duration: segments[j],
+          outPath,
+          isImage: false,
+          addGradient: true,
+          applyEffects: true,
+        });
+        tempScenes.push(outPath);
+      }
     }
   }
 

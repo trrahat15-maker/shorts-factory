@@ -38,7 +38,8 @@ Then open the Replit preview or go to `http://localhost:3000`.
 
 ## Usage
 
-1. Upload 1-3 base videos in **Library** (optional if stock video is enabled).
+1. Upload base videos in **Library** (optional if stock video is enabled).
+2. (Optional) Add portrait images to `user-images/` to mix your own photos into the AI visuals.
 2. In **Settings**, unlock the vault and save your OpenAI + ElevenLabs API keys.
 3. In **Create**, generate a script, voice, and video.
 4. Connect YouTube in **Settings** to enable uploads.
@@ -115,10 +116,19 @@ Optional background music:
 If you want fully automatic visuals with no base video uploads, add a Pexels API key:
 
 - `PEXELS_API_KEY`
+- `PIXABAY_API_KEY` (optional backup)
 - `ENABLE_STOCK_VIDEO=true`
 - `ENABLE_IMAGE_MODE=true`
 
 The workflow will fetch matching stock videos. If none are available, it falls back to images and creates Ken Burns-style slides.
+
+### Media Priority & Mixing
+
+1. **Stock visuals (Pexels)**: the system searches by script keywords.
+2. **User media**: `/base-videos/` and `/user-images/` are mixed in.
+3. **Cache fallback**: previously downloaded media under `data/stock-cache` (best on Replit/Render).
+
+If both stock + user media exist, the pipeline always mixes them so every video blends both sources.
 
 ### 2) Add required GitHub Secrets
 
@@ -131,6 +141,7 @@ Required:
 - `YOUTUBE_CLIENT_SECRET`
 - `YOUTUBE_REFRESH_TOKEN`
  - `PEXELS_API_KEY` (for free stock videos/images)
+ - `PIXABAY_API_KEY` (optional backup stock source)
 
 Optional overrides:
 - `OPENAI_MODEL`
@@ -148,6 +159,7 @@ Optional overrides:
 - `OPENAI_BASE_URL`
 - `ENABLE_STOCK_VIDEO` (`true` or `false`, default: `true`)
 - `ENABLE_IMAGE_MODE` (`true` or `false`, default: `true`)
+- `MIX_USER_MEDIA` (`true` or `false`, default: `true`)
 - `SUBTITLE_MODE` (`word` or `sentence`, default: `word`)
 - `SUBTITLE_HIGHLIGHT` (`true` or `false`, default: `true`)
 - `EXTRA_EFFECTS` (`true` or `false`, default: `true`)
