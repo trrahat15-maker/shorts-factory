@@ -5,8 +5,9 @@ import { google } from "googleapis";
 
 import { generateMetadata, generateScript } from "../src/openai.js";
 import { generateVoice } from "../src/voice.js";
-import { generateVideo } from "../src/video.js";
+import { generateStockBaseVideo, generateVideo, getMediaDuration } from "../src/video.js";
 import { uploadToYoutube } from "../src/youtube.js";
+import { extractKeywords, fetchStockScenes, splitScriptIntoParts } from "../src/stock.js";
 
 const log = (message) => console.log(`[auto] ${message}`);
 
@@ -61,6 +62,15 @@ function parseCsv(raw) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+function pickRandom(list, fallback = "") {
+  if (!Array.isArray(list) || list.length === 0) return fallback;
+  return list[Math.floor(Math.random() * list.length)];
 }
 
 function pickDailyTopic(topics) {
@@ -209,6 +219,7 @@ async function run() {
   const musicDir = path.join(process.cwd(), "music");
   const tempBaseDir = path.join(tempDir, "base-videos");
   const tempMusicDir = path.join(tempDir, "music");
+  const tempStockDir = path.join(tempDir, "stock");
 
   const baseVideoUrls = parseUrlList(getEnv("BASE_VIDEO_URLS"));
   const musicUrls = parseUrlList(getEnv("MUSIC_URLS"));
@@ -216,17 +227,9 @@ async function run() {
   const downloadedBase = await downloadMediaList(baseVideoUrls, tempBaseDir, "base-video");
   const downloadedMusic = await downloadMediaList(musicUrls, tempMusicDir, "music");
 
-  const baseVideos = downloadedBase.length
-    ? downloadedBase.map((file) => path.basename(file))
-    : await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
-  if (!baseVideos.length) {
-    throw new Error("No base videos found. Add files to /base-videos in the repo.");
-  }
-
   const musicTracks = downloadedMusic.length
     ? downloadedMusic.map((file) => path.basename(file))
     : await listMediaFiles(musicDir, [".mp3", ".wav", ".m4a"]);
-  const baseVideo = baseVideos[Math.floor(Math.random() * baseVideos.length)];
   const musicFile = musicTracks.length ? musicTracks[Math.floor(Math.random() * musicTracks.length)] : "";
 
   const prompt = getEnv(
@@ -267,6 +270,11 @@ async function run() {
   }
   const voice = getEnv("ELEVENLABS_VOICE", "alloy").trim();
   const maxDuration = Number(getEnv("MAX_DURATION", "0")) || 0;
+  const subtitleMode = getEnv("SUBTITLE_MODE", "word").trim().toLowerCase();
+  const highlightEnabled = getEnv("SUBTITLE_HIGHLIGHT", "true").toLowerCase() !== "false";
+  const enableStockVideo = getEnv("ENABLE_STOCK_VIDEO", "true").toLowerCase() !== "false";
+  const enableImageMode = getEnv("ENABLE_IMAGE_MODE", "true").toLowerCase() !== "false";
+  const pexelsApiKey = getEnv("PEXELS_API_KEY", "").trim();
 
   const titleOverride = getEnv("VIDEO_TITLE", "").trim();
   const descriptionOverride = getEnv("VIDEO_DESCRIPTION", "").trim();
@@ -388,22 +396,71 @@ async function run() {
     });
     voiceFile = voiceResult.file;
 
+    const voicePath = path.join(tempDir, voiceFile);
+    const audioDuration = await getMediaDuration(voicePath);
+    let basePath = "";
+
+    if (enableStockVideo) {
+      if (!pexelsApiKey) {
+        throw new Error("ENABLE_STOCK_VIDEO is true but PEXELS_API_KEY is missing.");
+      }
+      const parts = splitScriptIntoParts(script);
+      log(`Fetching stock visuals for ${parts.length} scenes`);
+      const scenes = await fetchStockScenes({
+        parts,
+        pexelsApiKey,
+        enableImages: enableImageMode,
+        tempDir: tempStockDir,
+      });
+      const usableScenes = scenes.filter((scene) => scene.type !== "empty");
+      if (usableScenes.length) {
+        basePath = await generateStockBaseVideo({
+          scenes: usableScenes,
+          outDir: tempDir,
+          totalDuration: audioDuration || 30,
+        });
+      } else {
+        log("No stock visuals found. Falling back to base-videos if available.");
+      }
+    }
+
+    if (!basePath) {
+      const baseVideos = downloadedBase.length
+        ? downloadedBase.map((file) => path.basename(file))
+        : await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
+      if (!baseVideos.length) {
+        throw new Error("No base videos found. Add files to /base-videos or enable stock visuals.");
+      }
+      const baseVideo = baseVideos[Math.floor(Math.random() * baseVideos.length)];
+      basePath = downloadedBase.length ? path.join(tempBaseDir, baseVideo) : path.join(baseDir, baseVideo);
+    }
+
     log("Creating video");
-    const basePath = downloadedBase.length ? path.join(tempBaseDir, baseVideo) : path.join(baseDir, baseVideo);
     const musicPath = musicFile
       ? downloadedMusic.length
         ? path.join(tempMusicDir, musicFile)
         : path.join(musicDir, musicFile)
       : null;
+    const highlightWords = highlightEnabled ? extractKeywords(script, 6) : [];
+    const subtitleStyle = {
+      fontSize: Math.round(randomBetween(58, 72)),
+      outline: Math.round(randomBetween(3, 6)),
+      yOffset: Math.round(randomBetween(180, 320)),
+      fontColor: "white",
+      highlightColor: pickRandom(["yellow", "cyan", "lime"], "yellow"),
+    };
 
     videoPath = await generateVideo({
       baseVideoPath: basePath,
-      voicePath: path.join(tempDir, voiceFile),
+      voicePath,
       script,
       outDir: tempDir,
       title,
       musicPath,
       maxDuration,
+      subtitleMode,
+      highlightWords,
+      subtitleStyle,
     });
   } catch (err) {
     log(`Video generation failed: ${err.message}`);

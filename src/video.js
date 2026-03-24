@@ -47,7 +47,32 @@ async function getMediaDuration(filePath) {
   });
 }
 
-function buildTimedSubtitles(script, totalDuration) {
+function normalizeWord(word) {
+  return word.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function buildTimedSubtitles(script, totalDuration, options = {}) {
+  const mode = options.mode || "sentence";
+  const highlightWords = Array.isArray(options.highlightWords) ? options.highlightWords : [];
+  const highlightSet = new Set(highlightWords.map((w) => normalizeWord(w)));
+
+  if (mode === "word") {
+    const words = script.split(/\s+/).map((w) => w.trim()).filter(Boolean);
+    if (!words.length) return [];
+    const fallbackWps = 2.6;
+    const duration = totalDuration || words.length / fallbackWps;
+    const perWord = duration / words.length;
+    return words.map((word, idx) => {
+      const clean = normalizeWord(word);
+      return {
+        text: word,
+        start: idx * perWord,
+        end: Math.min(duration, (idx + 1) * perWord),
+        highlight: highlightSet.has(clean),
+      };
+    });
+  }
+
   const sentences = splitScriptToSentences(script);
   if (!sentences.length) return [];
   const words = sentences.map((s) => s.split(/\s+/).filter(Boolean).length);
@@ -62,7 +87,8 @@ function buildTimedSubtitles(script, totalDuration) {
     const start = cursor;
     const end = Math.min(duration, start + segDuration);
     cursor = end;
-    return { text, start, end };
+    const highlight = highlightWords.some((word) => text.toLowerCase().includes(word.toLowerCase()));
+    return { text, start, end, highlight };
   });
 }
 
@@ -80,16 +106,20 @@ function buildSubtitleFilters(subtitles, style = {}) {
   const fadeOut = 0.25;
   const fontSize = Number(style.fontSize) || 64;
   const outline = Number(style.outline) || 4;
+  const yOffset = Number(style.yOffset) || 220;
+  const baseColor = style.fontColor || "white";
+  const highlightColor = style.highlightColor || "yellow";
 
   return subtitles.map((s) => {
     const text = escapeDrawtext(s.text || "");
     const start = Number(s.start ?? 0);
     const end = Number(s.end ?? start + 2.5);
+    const color = s.highlight ? highlightColor : baseColor;
     const alpha = `if(lt(t,${start}),0,` +
       `if(lt(t,${start + fadeIn}),(t-${start})/${fadeIn},` +
       `if(lt(t,${Math.max(start + fadeIn, end - fadeOut)}),1,` +
       `if(lt(t,${end}),(${end}-t)/${fadeOut},0))))`;
-    return `drawtext=fontsize=${fontSize}:fontcolor=white:borderw=${outline}:bordercolor=black:line_spacing=10:x=(w-text_w)/2:y=h-220:alpha='${alpha}':text='${text}'`;
+    return `drawtext=fontsize=${fontSize}:fontcolor=${color}:borderw=${outline}:bordercolor=black:line_spacing=10:x=(w-text_w)/2:y=h-${yOffset}:alpha='${alpha}':text='${text}'`;
   });
 }
 
@@ -113,6 +143,8 @@ export async function generateVideo({
   musicVolume,
   maxDuration,
   subtitleStyle,
+  subtitleMode,
+  highlightWords,
 }) {
   const safeTitle = sanitizeTitle(title);
   const outputFileName = `${safeTitle || "short"}-${Date.now()}.mp4`;
@@ -130,7 +162,10 @@ export async function generateVideo({
 
   let computedSubtitles = subtitles;
   if ((!computedSubtitles || computedSubtitles.length === 0) && script) {
-    computedSubtitles = buildTimedSubtitles(script, audioDuration);
+    computedSubtitles = buildTimedSubtitles(script, audioDuration, {
+      mode: subtitleMode || "sentence",
+      highlightWords: highlightWords || [],
+    });
   }
 
   const subtitleFilters = buildSubtitleFilters(computedSubtitles, subtitleStyle);
@@ -219,3 +254,225 @@ export async function generateVideo({
 }
 
 export { getMediaDuration };
+
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+function buildSceneFilters({ addGradient = true, applyEffects = true, isImage = false, duration = 3 } = {}) {
+  const contrast = applyEffects ? randomBetween(0.95, 1.1) : 1;
+  const brightness = applyEffects ? randomBetween(-0.04, 0.04) : 0;
+  const saturation = applyEffects ? randomBetween(0.9, 1.15) : 1;
+
+  const blur = "boxblur=20:1";
+  const base = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920";
+  const fg = "scale=1080:1920:force_original_aspect_ratio=decrease";
+
+  const frames = Math.max(1, Math.round(duration * 30));
+  const zoom = 1.12;
+  const source = isImage
+    ? `[0:v]zoompan=z='min(zoom+0.0015,${zoom})':d=${frames}:s=1080x1920:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'[src];`
+    : "[0:v]setpts=PTS-STARTPTS[src];";
+
+  let chain =
+    source +
+    `[src]${base},${blur}[bg];` +
+    `[src]${fg}[fg];` +
+    `[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p`;
+  if (applyEffects) {
+    chain += `,eq=contrast=${contrast}:brightness=${brightness}:saturation=${saturation}`;
+  }
+  chain += "[v0]";
+
+  if (addGradient) {
+    chain +=
+      ";color=c=black@0.0:s=1080x1920:d=1,format=rgba,geq=a='if(gt(Y,H*0.6),(Y-H*0.6)/(H*0.4)*0.35,0)'[grad];" +
+      "[v0][grad]overlay=0:0[v0]";
+  }
+
+  return chain;
+}
+
+async function renderSceneVideo({
+  inputPath,
+  duration,
+  outPath,
+  isImage = false,
+  addGradient = true,
+  applyEffects = true,
+}) {
+  const runRender = (withGradient) =>
+    new Promise((resolve, reject) => {
+      const command = ffmpeg();
+      if (isImage) {
+        command.input(inputPath).inputOptions(["-loop", "1"]);
+      } else {
+        command.input(inputPath).inputOptions(["-stream_loop", "-1"]);
+      }
+
+      const sceneFilter = buildSceneFilters({
+        addGradient: withGradient,
+        applyEffects,
+        isImage,
+        duration,
+      });
+
+      command
+        .complexFilter(sceneFilter, "v0")
+        .outputOptions([
+          "-map",
+          "[v0]",
+          "-preset",
+          "veryfast",
+          "-crf",
+          "23",
+          "-pix_fmt",
+          "yuv420p",
+          "-r",
+          "30",
+          "-t",
+          `${duration}`,
+        ])
+        .output(outPath)
+        .on("end", () => resolve(outPath))
+        .on("error", (err) => reject(err))
+        .run();
+    });
+
+  try {
+    if (!isImage) {
+      const inputDuration = await getMediaDuration(inputPath);
+      if (inputDuration && inputDuration > duration + 0.5) {
+        const maxStart = Math.max(0, inputDuration - duration - 0.5);
+        const startOffset = Math.random() * maxStart;
+        // rerun with seek by injecting -ss in input options
+        return await new Promise((resolve, reject) => {
+          const command = ffmpeg()
+            .input(inputPath)
+            .inputOptions(["-ss", `${startOffset}`, "-stream_loop", "-1"]);
+
+          const sceneFilter = buildSceneFilters({
+            addGradient,
+            applyEffects,
+            isImage,
+            duration,
+          });
+
+          command
+            .complexFilter(sceneFilter, "v0")
+            .outputOptions([
+              "-map",
+              "[v0]",
+              "-preset",
+              "veryfast",
+              "-crf",
+              "23",
+              "-pix_fmt",
+              "yuv420p",
+              "-r",
+              "30",
+              "-t",
+              `${duration}`,
+            ])
+            .output(outPath)
+            .on("end", () => resolve(outPath))
+            .on("error", (err) => reject(err))
+            .run();
+        });
+      }
+    }
+    return await runRender(addGradient);
+  } catch (err) {
+    if (addGradient) {
+      console.warn("[video] Gradient overlay failed, retrying without gradient.");
+      return runRender(false);
+    }
+    throw err;
+  }
+}
+
+async function concatScenes(scenePaths, outPath) {
+  const listPath = path.join(path.dirname(outPath), `concat-${Date.now()}.txt`);
+  const list = scenePaths.map((file) => `file '${file.replace(/'/g, "'\\''")}'`).join("\n");
+  fs.writeFileSync(listPath, list);
+
+  const attemptConcat = (reencode) =>
+    new Promise((resolve, reject) => {
+      const command = ffmpeg()
+        .input(listPath)
+        .inputOptions(["-f", "concat", "-safe", "0"]);
+
+      if (reencode) {
+        command.outputOptions(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", "30"]);
+      } else {
+        command.outputOptions(["-c", "copy"]);
+      }
+
+      command
+        .output(outPath)
+        .on("end", () => resolve(outPath))
+        .on("error", (err) => reject(err))
+        .run();
+    });
+
+  try {
+    return await attemptConcat(false);
+  } catch (err) {
+    console.warn("[video] concat copy failed, re-encoding.");
+    return attemptConcat(true);
+  }
+}
+
+export async function generateStockBaseVideo({ scenes, outDir, totalDuration }) {
+  if (!Array.isArray(scenes) || scenes.length === 0) {
+    throw new Error("No stock scenes provided.");
+  }
+
+  const tempScenes = [];
+  const wordCounts = scenes.map((scene) => (scene?.text || "").split(/\s+/).filter(Boolean).length || 1);
+  const totalWords = wordCounts.reduce((acc, n) => acc + n, 0) || 1;
+
+  let remaining = totalDuration || 30;
+  for (let i = 0; i < scenes.length; i += 1) {
+    const scene = scenes[i];
+    const portion = wordCounts[i] / totalWords;
+    const duration = i === scenes.length - 1 ? remaining : Math.max(3, remaining * portion);
+    remaining = Math.max(0, remaining - duration);
+
+    if (scene.type === "images" && Array.isArray(scene.paths) && scene.paths.length) {
+      const perImage = duration / scene.paths.length;
+      for (let j = 0; j < scene.paths.length; j += 1) {
+        const outPath = path.join(outDir, `scene-${i + 1}-${j + 1}.mp4`);
+        // eslint-disable-next-line no-await-in-loop
+        await renderSceneVideo({
+          inputPath: scene.paths[j],
+          duration: perImage,
+          outPath,
+          isImage: true,
+          addGradient: true,
+          applyEffects: true,
+        });
+        tempScenes.push(outPath);
+      }
+    } else if (scene.type === "video" && scene.path) {
+      const outPath = path.join(outDir, `scene-${i + 1}.mp4`);
+      // eslint-disable-next-line no-await-in-loop
+      await renderSceneVideo({
+        inputPath: scene.path,
+        duration,
+        outPath,
+        isImage: false,
+        addGradient: true,
+        applyEffects: true,
+      });
+      tempScenes.push(outPath);
+    }
+  }
+
+  if (!tempScenes.length) {
+    throw new Error("Unable to render any stock scenes.");
+  }
+
+  const mergedPath = path.join(outDir, `stock-base-${Date.now()}.mp4`);
+  return concatScenes(tempScenes, mergedPath);
+}

@@ -38,7 +38,7 @@ Then open the Replit preview or go to `http://localhost:3000`.
 
 ## Usage
 
-1. Upload 1-3 base videos in **Library**.
+1. Upload 1-3 base videos in **Library** (optional if stock video is enabled).
 2. In **Settings**, unlock the vault and save your OpenAI + ElevenLabs API keys.
 3. In **Create**, generate a script, voice, and video.
 4. Connect YouTube in **Settings** to enable uploads.
@@ -110,6 +110,16 @@ Optional background music:
 
 `music/`
 
+### Stock visuals (no base videos needed)
+
+If you want fully automatic visuals with no base video uploads, add a Pexels API key:
+
+- `PEXELS_API_KEY`
+- `ENABLE_STOCK_VIDEO=true`
+- `ENABLE_IMAGE_MODE=true`
+
+The workflow will fetch matching stock videos. If none are available, it falls back to images and creates Ken Burns-style slides.
+
 ### 2) Add required GitHub Secrets
 
 In your GitHub repo: **Settings -> Secrets and variables -> Actions -> New repository secret**
@@ -120,6 +130,7 @@ Required:
 - `YOUTUBE_CLIENT_ID`
 - `YOUTUBE_CLIENT_SECRET`
 - `YOUTUBE_REFRESH_TOKEN`
+ - `PEXELS_API_KEY` (for free stock videos/images)
 
 Optional overrides:
 - `OPENAI_MODEL`
@@ -135,6 +146,10 @@ Optional overrides:
 - `TITLE_VARIANTS` (default: 3)
 - `HASHTAGS` (comma separated, default: `#shorts,#motivation,#success`)
 - `OPENAI_BASE_URL`
+- `ENABLE_STOCK_VIDEO` (`true` or `false`, default: `true`)
+- `ENABLE_IMAGE_MODE` (`true` or `false`, default: `true`)
+- `SUBTITLE_MODE` (`word` or `sentence`, default: `word`)
+- `SUBTITLE_HIGHLIGHT` (`true` or `false`, default: `true`)
 - `ELEVENLABS_VOICE`
 - `VIDEO_TITLE`
 - `VIDEO_DESCRIPTION`
