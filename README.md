@@ -51,6 +51,7 @@ Then open the Replit preview or go to `http://localhost:3000`.
 - ElevenLabs is required for exporting MP3 narration and video generation.
 - Replit may sleep after inactivity; automation runs only while the app is open.
 - Base videos are automatically cropped to 9:16 and looped to match narration length.
+- Set `YOUTUBE_PRIVACY_STATUS` to `public`, `unlisted`, or `private` (default: `public`).
 - Auto metadata can be toggled in **Settings** and uses your script to generate titles, descriptions, and tags.
 - For extra security, set an **App Access Token** in Settings. The backend will require `x-app-token` for API calls.
 
@@ -140,6 +141,8 @@ Optional overrides:
 - `MAX_DURATION`
 - `BASE_VIDEO_URLS` (comma separated URLs)
 - `MUSIC_URLS` (comma separated URLs)
+- `YOUTUBE_PRIVACY_STATUS` (`public`, `unlisted`, or `private`)
+- `VIDEO_RANDOM_START` (`true` to randomize the start offset, `false` to always start at 0)
 
 Optional analysis secrets (for manual run):
 - `CHANNEL_ID`

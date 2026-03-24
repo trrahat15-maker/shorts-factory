@@ -118,9 +118,18 @@ export async function generateVideo({
   const outputFileName = `${safeTitle || "short"}-${Date.now()}.mp4`;
   const outputPath = path.join(outDir, outputFileName);
 
+  const audioDuration = voicePath ? await getMediaDuration(voicePath) : null;
+  const baseDuration = baseVideoPath ? await getMediaDuration(baseVideoPath) : null;
+  const randomizeStart = process.env.VIDEO_RANDOM_START?.toLowerCase() !== "false";
+  const needsLoop = !audioDuration || !baseDuration || baseDuration < audioDuration + 0.5;
+  let startOffset = 0;
+  if (randomizeStart && baseDuration && audioDuration && baseDuration > audioDuration + 1) {
+    const maxStart = Math.max(0, baseDuration - audioDuration - 0.5);
+    startOffset = Math.random() * maxStart;
+  }
+
   let computedSubtitles = subtitles;
   if ((!computedSubtitles || computedSubtitles.length === 0) && script) {
-    const audioDuration = await getMediaDuration(voicePath);
     computedSubtitles = buildTimedSubtitles(script, audioDuration);
   }
 
@@ -134,9 +143,17 @@ export async function generateVideo({
 
   const runFfmpeg = (filters) =>
     new Promise((resolve, reject) => {
-      const command = ffmpeg()
-        .input(baseVideoPath)
-        .inputOptions(["-stream_loop", "-1"]);
+      const baseInputOptions = [];
+      if (startOffset > 0) {
+        baseInputOptions.push("-ss", `${startOffset}`);
+      }
+      if (needsLoop) {
+        baseInputOptions.push("-stream_loop", "-1");
+      } else if (audioDuration) {
+        baseInputOptions.push("-t", `${audioDuration}`);
+      }
+
+      const command = ffmpeg().input(baseVideoPath).inputOptions(baseInputOptions);
 
       if (voicePath) {
         command.input(voicePath);

@@ -64,7 +64,9 @@ export async function uploadToYoutube({ accessToken, refreshToken, videoPath, ti
           "Daily motivational shorts.\n\nSubscribe for more success mindset content.\n\n#motivation #success #discipline",
         tags: Array.isArray(tags) ? tags : [],
       },
-      status: { privacyStatus: "private" },
+      status: {
+        privacyStatus: (process.env.YOUTUBE_PRIVACY_STATUS || "public").toLowerCase(),
+      },
     },
     media: {
       body: fs.createReadStream(videoPath),
