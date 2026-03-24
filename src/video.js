@@ -51,6 +51,26 @@ function normalizeWord(word) {
   return word.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+function buildExtraEffects({ enabled, includeEq }) {
+  if (!enabled) return [];
+  const filters = [];
+  if (Math.random() < 0.35) filters.push("hflip");
+  if (Math.random() < 0.08) filters.push("vflip");
+  if (Math.random() < 0.35) filters.push("vignette");
+  if (Math.random() < 0.3) filters.push("unsharp=5:5:0.8:5:5:0.0");
+  if (includeEq) {
+    const contrast = randomBetween(0.96, 1.1);
+    const brightness = randomBetween(-0.05, 0.05);
+    const saturation = randomBetween(0.9, 1.15);
+    filters.push(`eq=contrast=${contrast}:brightness=${brightness}:saturation=${saturation}`);
+  }
+  return filters;
+}
+
 function buildTimedSubtitles(script, totalDuration, options = {}) {
   const mode = options.mode || "sentence";
   const highlightWords = Array.isArray(options.highlightWords) ? options.highlightWords : [];
@@ -169,12 +189,14 @@ export async function generateVideo({
   }
 
   const subtitleFilters = buildSubtitleFilters(computedSubtitles, subtitleStyle);
+  const extraEffectsEnabled = process.env.EXTRA_EFFECTS?.toLowerCase() !== "false";
+  const extraFilters = buildExtraEffects({ enabled: extraEffectsEnabled, includeEq: true });
   const baseFilters = [
     "scale=1080:1920:force_original_aspect_ratio=increase",
     "crop=1080:1920",
     "setsar=1",
   ];
-  const videoFilters = baseFilters.concat(subtitleFilters);
+  const videoFilters = baseFilters.concat(extraFilters, subtitleFilters);
 
   const runFfmpeg = (filters) =>
     new Promise((resolve, reject) => {
@@ -255,10 +277,6 @@ export async function generateVideo({
 
 export { getMediaDuration };
 
-function randomBetween(min, max) {
-  return min + Math.random() * (max - min);
-}
-
 function buildSceneFilters({ addGradient = true, applyEffects = true, isImage = false, duration = 3 } = {}) {
   const contrast = applyEffects ? randomBetween(0.95, 1.1) : 1;
   const brightness = applyEffects ? randomBetween(-0.04, 0.04) : 0;
@@ -274,6 +292,7 @@ function buildSceneFilters({ addGradient = true, applyEffects = true, isImage = 
     ? `[0:v]zoompan=z='min(zoom+0.0015,${zoom})':d=${frames}:s=1080x1920:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'[src];`
     : "[0:v]setpts=PTS-STARTPTS[src];";
 
+  const extraFilters = buildExtraEffects({ enabled: applyEffects, includeEq: false });
   let chain =
     source +
     `[src]${base},${blur}[bg];` +
@@ -281,6 +300,9 @@ function buildSceneFilters({ addGradient = true, applyEffects = true, isImage = 
     `[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p`;
   if (applyEffects) {
     chain += `,eq=contrast=${contrast}:brightness=${brightness}:saturation=${saturation}`;
+  }
+  if (extraFilters.length) {
+    chain += `,${extraFilters.join(",")}`;
   }
   chain += "[v0]";
 

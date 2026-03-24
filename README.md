@@ -150,6 +150,7 @@ Optional overrides:
 - `ENABLE_IMAGE_MODE` (`true` or `false`, default: `true`)
 - `SUBTITLE_MODE` (`word` or `sentence`, default: `word`)
 - `SUBTITLE_HIGHLIGHT` (`true` or `false`, default: `true`)
+- `EXTRA_EFFECTS` (`true` or `false`, default: `true`)
 - `ELEVENLABS_VOICE`
 - `VIDEO_TITLE`
 - `VIDEO_DESCRIPTION`
