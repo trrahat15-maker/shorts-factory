@@ -129,6 +129,7 @@ Optional overrides:
 - `OPENAI_RETRY_DELAYS` (comma separated seconds, default: `30,60,90`)
 - `AUTO_METADATA` (`true` or `false`, default: `true`)
 - `CHANNEL_CONTEXT` (short channel description for better titles/tags)
+- `UPLOAD_CHANCE` (0-1, default: `1`, use `0.6` to make the second daily run optional)
 - `SCRIPT_LANGUAGE` (default: English)
 - `TOPIC_LIST` (comma separated topics for daily rotation)
 - `TITLE_VARIANTS` (default: 3)
@@ -138,6 +139,7 @@ Optional overrides:
 - `VIDEO_TITLE`
 - `VIDEO_DESCRIPTION`
 - `VIDEO_TAGS` (comma separated)
+- `YOUTUBE_PRIVACY_STATUS` (`public`, `unlisted`, or `private`)
 - `MAX_DURATION`
 - `BASE_VIDEO_URLS` (comma separated URLs)
 - `MUSIC_URLS` (comma separated URLs)

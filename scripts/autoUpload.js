@@ -24,6 +24,15 @@ function getEnv(name, fallback = "") {
   return value;
 }
 
+function shouldSkipRun() {
+  const chance = Number(getEnv("UPLOAD_CHANCE", "1"));
+  if (!Number.isFinite(chance)) return false;
+  if (chance >= 1) return false;
+  if (chance <= 0) return true;
+  const roll = Math.random();
+  return roll > chance;
+}
+
 function requireEnv() {
   const missing = REQUIRED_ENV.filter((key) => !process.env[key]);
   if (missing.length) {
@@ -187,6 +196,11 @@ async function cleanupTemp(tempDir) {
 
 async function run() {
   requireEnv();
+
+  if (shouldSkipRun()) {
+    log("Skipping upload this run based on UPLOAD_CHANCE.");
+    return;
+  }
 
   const tempDir = path.join(os.tmpdir(), "shorts-factory-daily");
   await fs.mkdir(tempDir, { recursive: true });
