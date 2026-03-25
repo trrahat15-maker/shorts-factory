@@ -389,7 +389,7 @@ async function renderSceneVideo({
           "-r",
           "30",
           "-t",
-          f"{duration}",
+          `${duration}`,
         ])
         .output(outPath)
         .on("end", () => resolve(outPath))
