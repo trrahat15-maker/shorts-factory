@@ -25,7 +25,13 @@ if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
 if (ffprobePath) ffmpeg.setFfprobePath(ffprobePath);
 
 function sanitizeTitle(title) {
-  return title ? title.replace(/[^a-zA-Z0-9-_ ]/g, "").trim().replace(/\s+/g, "-") : `short-${Date.now()}`;
+  if (!title) return `short-${Date.now()}`;
+  const safe = title
+    .replace(/[^a-zA-Z0-9-_ ]/g, "")
+    .trim()
+    .replace(/\s+/g, "-");
+  const maxLen = 80;
+  return safe.length > maxLen ? safe.slice(0, maxLen) : safe;
 }
 
 function splitScriptToSentences(script) {
