@@ -402,7 +402,7 @@ async function renderSceneVideo({
     inputDuration && inputDuration > duration + 0.5
       ? Math.random() * Math.max(0, inputDuration - duration - 0.5)
       : 0;
-  const inputOptions = startOffset > 0 ? ["-ss", f"{startOffset}"] : [];
+  const inputOptions = startOffset > 0 ? ["-ss", `${startOffset}`] : [];
 
   try {
     return await runWithFilters({
