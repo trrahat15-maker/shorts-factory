@@ -77,6 +77,35 @@ function needsCta(text) {
   return !/(subscribe|follow|share|save|comment|like)/i.test(text || "");
 }
 
+function estimateWordsPerSecond() {
+  const wps = Number(getEnv("WORDS_PER_SECOND", "2.6"));
+  return Number.isFinite(wps) && wps > 0 ? wps : 2.6;
+}
+
+function ensureMinScriptLength(script, minSeconds) {
+  if (!minSeconds) return script;
+  const wps = estimateWordsPerSecond();
+  const minWords = Math.ceil(minSeconds * wps);
+  const words = script.split(/\s+/).filter(Boolean);
+  if (words.length >= minWords) return script;
+  const fillers = [
+    "Keep showing up, even when it feels slow.",
+    "Small wins stack into massive results.",
+    "Your future self is built by today’s choices.",
+    "Discipline beats motivation on the hard days.",
+    "One more rep. One more page. One more try.",
+    "Stay focused. Stay consistent. Stay unstoppable.",
+    "Progress is quiet, but it’s always moving.",
+  ];
+  const extra = [];
+  let idx = 0;
+  while (words.length + extra.join(" ").split(/\s+/).filter(Boolean).length < minWords) {
+    extra.push(fillers[idx % fillers.length]);
+    idx += 1;
+  }
+  return `${script.trim()} ${extra.join(" ")}`.replace(/\s+/g, " ").trim();
+}
+
 function polishTitle(input) {
   if (!input) return input;
   let title = String(input).trim();
@@ -398,6 +427,7 @@ async function run() {
       const cta = pickRandom(ctaList, "Save this and share it.");
       script = `${script.trim()} ${cta}`.replace(/\s+/g, " ").trim();
     }
+    script = ensureMinScriptLength(script, minDurationFinal);
 
     if (useAiMetadata) {
       try {
@@ -453,6 +483,8 @@ async function run() {
 
     const voicePath = path.join(tempDir, voiceFile);
     const audioDuration = await getMediaDuration(voicePath);
+    const desiredVisualDuration =
+      maxDurationFinal || minDurationFinal || audioDuration || Number(getEnv("SCRIPT_DURATION_SECONDS", "30")) || 30;
     let basePath = "";
 
     const userVideos = downloadedBase.length
@@ -553,7 +585,7 @@ async function run() {
         basePath = await generateStockBaseVideo({
           scenes: usableMixed,
           outDir: tempDir,
-          totalDuration: audioDuration || 30,
+          totalDuration: desiredVisualDuration,
         });
       } else {
         log("No stock visuals found. Falling back to base-videos if available.");

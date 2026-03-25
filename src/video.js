@@ -387,11 +387,13 @@ export async function generateVideo({
         "-preset veryfast",
         "-crf 23",
         "-movflags +faststart",
-        "-shortest",
         "-r 30",
       ];
-      if (minDuration && Number(minDuration) > 0) {
-        outputOptions.push("-t", `${Number(minDuration)}`);
+      const durationLimit = Number(maxDuration) > 0 ? Number(maxDuration) : Number(minDuration) > 0 ? Number(minDuration) : 0;
+      if (durationLimit > 0) {
+        outputOptions.push("-t", `${durationLimit}`);
+      } else {
+        outputOptions.push("-shortest");
       }
       const limiter = process.env.AUDIO_LIMITER?.toLowerCase() !== "false";
       if (limiter) {
