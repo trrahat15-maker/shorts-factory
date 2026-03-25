@@ -383,6 +383,7 @@ export async function generateVideo({
       });
 
       const outputOptions = [
+        "-y",
         "-preset veryfast",
         "-crf 23",
         "-movflags +faststart",
@@ -408,6 +409,41 @@ export async function generateVideo({
         .run();
     });
 
+  const runBare = () =>
+    new Promise((resolve, reject) => {
+      const command = ffmpeg().input(baseVideoPath);
+      if (voicePath) {
+        command.input(voicePath);
+      }
+      const basicFilters = ["scale=1080:1920:force_original_aspect_ratio=increase", "crop=1080:1920", "setsar=1"];
+      command.videoFilters(basicFilters.join(","));
+      if (voicePath) {
+        command.outputOptions(["-map", "0:v", "-map", "1:a"]);
+      } else {
+        command.outputOptions(["-map", "0:v"]);
+      }
+      const outputOptions = [
+        "-y",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-movflags",
+        "+faststart",
+        "-r",
+        "30",
+      ];
+      if (minDuration && Number(minDuration) > 0) {
+        outputOptions.push("-t", `${Number(minDuration)}`);
+      }
+      command
+        .outputOptions(outputOptions)
+        .output(outputPath)
+        .on("error", (err) => reject(err))
+        .on("end", () => resolve(outputPath))
+        .run();
+    });
+
   try {
     return await runFfmpeg(videoFilters, true);
   } catch (err) {
@@ -421,9 +457,14 @@ export async function generateVideo({
     }
     if (subtitleFilters.length && shouldRetryWithoutSubtitles(err)) {
       console.warn("[video] Subtitles filter failed. Retrying without subtitles.");
-      return runFfmpeg(baseFilters, false);
+      try {
+        return await runFfmpeg(baseFilters, false);
+      } catch (innerErr) {
+        err = innerErr;
+      }
     }
-    throw err;
+    console.warn("[video] Full pipeline failed. Retrying with bare render.");
+    return runBare();
   }
 }
 
