@@ -247,8 +247,7 @@ export async function generateVideo({
   keywordPopups,
   watermarkText,
 }) {
-  const safeTitle = sanitizeTitle(title);
-  const outputFileName = `${safeTitle || "short"}-${Date.now()}.mp4`;
+  const outputFileName = `short-${Date.now()}.mp4`;
   const outputPath = path.join(outDir, outputFileName);
 
   const audioDuration = voicePath ? await getMediaDuration(voicePath) : null;
