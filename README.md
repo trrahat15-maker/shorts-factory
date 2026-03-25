@@ -174,6 +174,7 @@ Optional overrides:
 - `YOUTUBE_PRIVACY_STATUS` (`public`, `unlisted`, or `private`)
 - `MAX_DURATION`
 - `SCRIPT_DURATION_SECONDS` (default: 30, set to 60 for longer scripts)
+- `MIN_DURATION` (minimum video length in seconds, e.g. `50`)
 - `ALLOW_VFLIP` (`true` to allow vertical flips, default: `false`)
 - `CTA_LIST` (comma separated CTA lines)
 - `APPEND_CTA` (`true` or `false`, default: `true`)

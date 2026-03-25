@@ -257,10 +257,17 @@ async function run() {
     : await listMediaFiles(musicDir, [".mp3", ".wav", ".m4a"]);
   const musicFile = musicTracks.length ? musicTracks[Math.floor(Math.random() * musicTracks.length)] : "";
 
+  const minDurationEnv = Number(getEnv("MIN_DURATION", ""));
+  const minDuration = Number.isFinite(minDurationEnv) && minDurationEnv > 0 ? minDurationEnv : 0;
   const maxDurationEnv = Number(getEnv("MAX_DURATION", ""));
-  const maxDuration = Number.isFinite(maxDurationEnv) && maxDurationEnv > 0 ? maxDurationEnv : 0;
-  const targetSeconds =
-    Number(getEnv("SCRIPT_DURATION_SECONDS", maxDuration ? String(maxDuration) : "30")) || 30;
+  let maxDuration = Number.isFinite(maxDurationEnv) && maxDurationEnv > 0 ? maxDurationEnv : 0;
+  if (minDuration && maxDuration && minDuration > maxDuration) {
+    maxDuration = minDuration;
+  }
+  const targetSecondsRaw = Number(
+    getEnv("SCRIPT_DURATION_SECONDS", maxDuration ? String(maxDuration) : "30")
+  );
+  const targetSeconds = Math.max(minDuration || 0, targetSecondsRaw || 30);
   const prompt = getEnv(
     "PROMPT",
     `Write a ${targetSeconds} second motivational speech for YouTube Shorts. Hook the viewer in the first sentence. Use simple powerful language.`
@@ -299,6 +306,7 @@ async function run() {
   }
   const voice = getEnv("ELEVENLABS_VOICE", "alloy").trim();
   const maxDurationFinal = maxDuration || 0;
+  const minDurationFinal = minDuration || 0;
   const subtitleMode = getEnv("SUBTITLE_MODE", "word").trim().toLowerCase();
   const highlightEnabled = getEnv("SUBTITLE_HIGHLIGHT", "true").toLowerCase() !== "false";
   const enableStockVideo = getEnv("ENABLE_STOCK_VIDEO", "true").toLowerCase() !== "false";
@@ -601,6 +609,7 @@ async function run() {
       title,
       musicPath,
       maxDuration: maxDurationFinal,
+      minDuration: minDurationFinal,
       musicVolume: Number.isFinite(musicVolume) ? musicVolume : 0.18,
       subtitleMode,
       highlightWords,

@@ -233,6 +233,7 @@ export async function generateVideo({
   musicPath,
   musicVolume,
   maxDuration,
+  minDuration,
   subtitleStyle,
   subtitleMode,
   highlightWords,
@@ -246,8 +247,11 @@ export async function generateVideo({
 
   const audioDuration = voicePath ? await getMediaDuration(voicePath) : null;
   const baseDuration = baseVideoPath ? await getMediaDuration(baseVideoPath) : null;
+  const minTarget = Number(minDuration) || 0;
+  const targetDuration =
+    minTarget && audioDuration && audioDuration < minTarget ? minTarget : audioDuration || minTarget || null;
   const randomizeStart = process.env.VIDEO_RANDOM_START?.toLowerCase() !== "false";
-  const needsLoop = !audioDuration || !baseDuration || baseDuration < audioDuration + 0.5;
+  const needsLoop = !targetDuration || !baseDuration || baseDuration < targetDuration + 0.5;
   let startOffset = 0;
   if (randomizeStart && baseDuration && audioDuration && baseDuration > audioDuration + 1) {
     const maxStart = Math.max(0, baseDuration - audioDuration - 0.5);
@@ -256,7 +260,7 @@ export async function generateVideo({
 
   let computedSubtitles = subtitles;
   if ((!computedSubtitles || computedSubtitles.length === 0) && script) {
-    computedSubtitles = buildTimedSubtitles(script, audioDuration, {
+    computedSubtitles = buildTimedSubtitles(script, targetDuration || audioDuration, {
       mode: subtitleMode || "sentence",
       highlightWords: highlightWords || [],
     });
@@ -267,7 +271,7 @@ export async function generateVideo({
   const hookFilter = buildHookFilter(hookText, subtitleStyle);
   const popupFilters = buildKeywordPopups(
     Array.isArray(keywordPopups) ? keywordPopups : [],
-    audioDuration,
+    targetDuration || audioDuration,
     subtitleStyle
   );
   const watermarkFilter = buildWatermarkFilter(watermarkText);
@@ -321,14 +325,17 @@ export async function generateVideo({
       const maps = ["0:v"];
       const complexFilters = [];
       const bgVolume = typeof musicVolume === "number" ? musicVolume : 0.18;
+      const padTo = Number(minDuration) || 0;
       if (voicePath && musicPath) {
         const ducking = enableDucking && process.env.AUDIO_DUCKING?.toLowerCase() !== "false";
         const trimSilence = process.env.TRIM_SILENCE?.toLowerCase() !== "false";
         const silenceThresh = process.env.SILENCE_THRESHOLD || "-30dB";
         const silenceDuration = process.env.SILENCE_DURATION || "0.2";
+        const needsPad = padTo && audioDuration && audioDuration < padTo;
+        const padFilter = needsPad ? `apad,atrim=duration=${padTo}` : "anull";
         const voiceFilter = trimSilence
-          ? `silenceremove=start_periods=1:start_duration=${silenceDuration}:start_threshold=${silenceThresh}:stop_periods=1:stop_duration=${silenceDuration}:stop_threshold=${silenceThresh}`
-          : "anull";
+          ? `silenceremove=start_periods=1:start_duration=${silenceDuration}:start_threshold=${silenceThresh}:stop_periods=1:stop_duration=${silenceDuration}:stop_threshold=${silenceThresh},${padFilter}`
+          : padFilter;
         if (ducking) {
           complexFilters.push(`[1:a]${voiceFilter},volume=1.0[voice]`);
           complexFilters.push("[2:a]volume=1.0[music]");
@@ -345,9 +352,13 @@ export async function generateVideo({
         const trimSilence = process.env.TRIM_SILENCE?.toLowerCase() !== "false";
         const silenceThresh = process.env.SILENCE_THRESHOLD || "-30dB";
         const silenceDuration = process.env.SILENCE_DURATION || "0.2";
-        if (trimSilence) {
+        const needsPad = padTo && audioDuration && audioDuration < padTo;
+        const padFilter = needsPad ? `apad,atrim=duration=${padTo}` : "anull";
+        if (trimSilence || needsPad) {
           complexFilters.push(
-            `[1:a]silenceremove=start_periods=1:start_duration=${silenceDuration}:start_threshold=${silenceThresh}:stop_periods=1:stop_duration=${silenceDuration}:stop_threshold=${silenceThresh}[aout]`
+            `[1:a]${trimSilence
+              ? `silenceremove=start_periods=1:start_duration=${silenceDuration}:start_threshold=${silenceThresh}:stop_periods=1:stop_duration=${silenceDuration}:stop_threshold=${silenceThresh},${padFilter}`
+              : padFilter}[aout]`
           );
           maps.push("[aout]");
         } else {
@@ -373,6 +384,9 @@ export async function generateVideo({
         "-shortest",
         "-r 30",
       ];
+      if (minDuration && Number(minDuration) > 0) {
+        outputOptions.push("-t", `${Number(minDuration)}`);
+      }
       const limiter = process.env.AUDIO_LIMITER?.toLowerCase() !== "false";
       if (limiter) {
         command.audioFilters("alimiter=limit=0.95");
