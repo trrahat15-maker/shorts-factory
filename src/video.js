@@ -82,13 +82,20 @@ function buildTimedSubtitles(script, totalDuration, options = {}) {
     if (!words.length) return [];
     const fallbackWps = 2.6;
     const duration = totalDuration || words.length / fallbackWps;
-    const perWord = duration / words.length;
+    const punctWeight = Number(process.env.SUBTITLE_PUNCT_WEIGHT || "0.35");
+    const weights = words.map((word) => (/[.!?]$/.test(word) ? 1 + punctWeight : 1));
+    const totalWeight = weights.reduce((acc, n) => acc + n, 0) || 1;
+    let cursor = 0;
     return words.map((word, idx) => {
       const clean = normalizeWord(word);
+      const seg = (duration * weights[idx]) / totalWeight;
+      const start = cursor;
+      const end = Math.min(duration, start + seg);
+      cursor = end;
       return {
         text: word,
-        start: idx * perWord,
-        end: Math.min(duration, (idx + 1) * perWord),
+        start,
+        end,
         highlight: highlightSet.has(clean),
       };
     });
@@ -491,14 +498,24 @@ export async function generateStockBaseVideo({ scenes, outDir, totalDuration }) 
   const totalWords = wordCounts.reduce((acc, n) => acc + n, 0) || 1;
 
   const splitDuration = (duration) => {
-    const segments = [];
+    const minCut = Number(process.env.CLIP_MIN_SECONDS || "1.5");
+    const maxCut = Number(process.env.CLIP_MAX_SECONDS || "3");
+    const targetCut = Number(process.env.CLIP_TARGET_SECONDS || "2.3");
+    let segments = Math.max(1, Math.round(duration / targetCut));
+    segments = Math.max(segments, Math.ceil(duration / maxCut));
+    segments = Math.min(segments, Math.max(1, Math.floor(duration / minCut)));
+
+    const parts = [];
     let remaining = duration;
-    while (remaining > 0.15) {
-      const seg = Math.min(remaining, randomBetween(1.5, 3));
-      segments.push(seg);
+    for (let i = 0; i < segments; i += 1) {
+      const remainingSegs = segments - i;
+      const minAllowed = Math.max(minCut, remaining - maxCut * (remainingSegs - 1));
+      const maxAllowed = Math.min(maxCut, remaining - minCut * (remainingSegs - 1));
+      const seg = i === segments - 1 ? remaining : randomBetween(minAllowed, maxAllowed);
+      parts.push(seg);
       remaining -= seg;
     }
-    return segments;
+    return parts;
   };
 
   let remaining = totalDuration || 30;

@@ -163,6 +163,10 @@ Optional overrides:
 - `SUBTITLE_MODE` (`word` or `sentence`, default: `word`)
 - `SUBTITLE_HIGHLIGHT` (`true` or `false`, default: `true`)
 - `EXTRA_EFFECTS` (`true` or `false`, default: `true`)
+- `SUBTITLE_PUNCT_WEIGHT` (default: `0.35`, adds a small pause after punctuation for better sync)
+- `CLIP_MIN_SECONDS` (default: `1.5`)
+- `CLIP_MAX_SECONDS` (default: `3.0`)
+- `CLIP_TARGET_SECONDS` (default: `2.3`)
 - `ELEVENLABS_VOICE`
 - `VIDEO_TITLE`
 - `VIDEO_DESCRIPTION`
