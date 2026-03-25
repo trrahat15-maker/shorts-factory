@@ -233,9 +233,13 @@ async function run() {
     : await listMediaFiles(musicDir, [".mp3", ".wav", ".m4a"]);
   const musicFile = musicTracks.length ? musicTracks[Math.floor(Math.random() * musicTracks.length)] : "";
 
+  const maxDurationEnv = Number(getEnv("MAX_DURATION", ""));
+  const maxDuration = Number.isFinite(maxDurationEnv) && maxDurationEnv > 0 ? maxDurationEnv : 0;
+  const targetSeconds =
+    Number(getEnv("SCRIPT_DURATION_SECONDS", maxDuration ? String(maxDuration) : "30")) || 30;
   const prompt = getEnv(
     "PROMPT",
-    "Write a 30 second motivational speech for YouTube Shorts. Hook the viewer in the first sentence. Use simple powerful language."
+    `Write a ${targetSeconds} second motivational speech for YouTube Shorts. Hook the viewer in the first sentence. Use simple powerful language.`
   );
   const language = getEnv("SCRIPT_LANGUAGE", "English").trim();
   const topics = parseCsv(getEnv("TOPIC_LIST", ""));
@@ -270,7 +274,7 @@ async function run() {
     openaiModel = "gpt-4o-mini";
   }
   const voice = getEnv("ELEVENLABS_VOICE", "alloy").trim();
-  const maxDuration = Number(getEnv("MAX_DURATION", "0")) || 0;
+  const maxDurationFinal = maxDuration || 0;
   const subtitleMode = getEnv("SUBTITLE_MODE", "word").trim().toLowerCase();
   const highlightEnabled = getEnv("SUBTITLE_HIGHLIGHT", "true").toLowerCase() !== "false";
   const enableStockVideo = getEnv("ENABLE_STOCK_VIDEO", "true").toLowerCase() !== "false";
@@ -527,7 +531,7 @@ async function run() {
       outDir: tempDir,
       title,
       musicPath,
-      maxDuration,
+      maxDuration: maxDurationFinal,
       subtitleMode,
       highlightWords,
       subtitleStyle,

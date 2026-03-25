@@ -59,7 +59,8 @@ function buildExtraEffects({ enabled, includeEq }) {
   if (!enabled) return [];
   const filters = [];
   if (Math.random() < 0.35) filters.push("hflip");
-  if (Math.random() < 0.08) filters.push("vflip");
+  const allowVFlip = process.env.ALLOW_VFLIP?.toLowerCase() === "true";
+  if (allowVFlip && Math.random() < 0.08) filters.push("vflip");
   if (Math.random() < 0.35) filters.push("vignette");
   if (Math.random() < 0.3) filters.push("unsharp=5:5:0.8:5:5:0.0");
   if (includeEq) {

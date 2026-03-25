@@ -169,6 +169,8 @@ Optional overrides:
 - `VIDEO_TAGS` (comma separated)
 - `YOUTUBE_PRIVACY_STATUS` (`public`, `unlisted`, or `private`)
 - `MAX_DURATION`
+- `SCRIPT_DURATION_SECONDS` (default: 30, set to 60 for longer scripts)
+- `ALLOW_VFLIP` (`true` to allow vertical flips, default: `false`)
 - `BASE_VIDEO_URLS` (comma separated URLs)
 - `MUSIC_URLS` (comma separated URLs)
 - `YOUTUBE_PRIVACY_STATUS` (`public`, `unlisted`, or `private`)
