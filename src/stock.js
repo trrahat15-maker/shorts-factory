@@ -88,6 +88,21 @@ const STOPWORDS = new Set([
   "or",
 ]);
 
+const KEYWORD_SYNONYMS = {
+  success: ["achievement", "winning", "business", "money"],
+  failure: ["struggle", "loss", "sad", "setback"],
+  discipline: ["training", "routine", "habit", "grind"],
+  focus: ["study", "deep work", "concentration"],
+  confidence: ["leader", "speaker", "stage"],
+  fear: ["anxiety", "dark", "alone"],
+  dream: ["goal", "vision", "future"],
+  hustle: ["city", "night work", "office"],
+  grind: ["gym", "training", "workout"],
+  growth: ["progress", "improvement", "evolution"],
+  mindset: ["mental", "psychology", "brain"],
+  power: ["strength", "energy", "force"],
+};
+
 function normalizeWord(word) {
   return word.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -109,6 +124,39 @@ export function extractKeywords(text, maxKeywords = 5) {
     .map(([word]) => word);
 }
 
+function shuffleArray(items) {
+  const array = [...items];
+  for (let i = array.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
+function expandKeywords(keywords) {
+  const expanded = new Set();
+  keywords.forEach((keyword) => {
+    const norm = normalizeWord(keyword);
+    expanded.add(norm);
+    const synonyms = KEYWORD_SYNONYMS[norm];
+    if (synonyms) {
+      synonyms.forEach((syn) => expanded.add(syn));
+    }
+  });
+  return Array.from(expanded).filter(Boolean);
+}
+
+function buildQueryVariants(text) {
+  const keywords = extractKeywords(text, 5);
+  if (!keywords.length) return ["motivation success"];
+  const expanded = expandKeywords(keywords);
+  const primary = keywords.slice(0, 3).join(" ");
+  const secondary = expanded.slice(0, 4).join(" ");
+  const variants = new Set([primary, secondary]);
+  keywords.forEach((word) => variants.add(word));
+  return Array.from(variants).filter(Boolean);
+}
+
 export function splitScriptIntoParts(script) {
   if (!script) return [];
   const sentences = script
@@ -118,8 +166,9 @@ export function splitScriptIntoParts(script) {
 
   const wordCount = script.split(/\s+/).filter(Boolean).length;
   let parts = 2;
-  if (wordCount > 80) parts = 4;
-  else if (wordCount > 50) parts = 3;
+  if (wordCount > 90) parts = 5;
+  else if (wordCount > 70) parts = 4;
+  else if (wordCount > 45) parts = 3;
 
   if (sentences.length <= parts) {
     return sentences.map((text) => ({ text }));
@@ -163,16 +212,26 @@ function pickBestVideoFile(video) {
   return sorted[0];
 }
 
-export async function fetchPexelsVideo(query, apiKey) {
+export async function fetchPexelsVideos(query, apiKey, limit = 3) {
   const url = `https://api.pexels.com/videos/search?query=${encodeURIComponent(
     query
   )}&per_page=6&orientation=portrait`;
   const data = await fetchJson(url, { Authorization: apiKey });
   const videos = Array.isArray(data?.videos) ? data.videos : [];
-  if (!videos.length) return null;
-  const chosen = videos[Math.floor(Math.random() * videos.length)];
-  const file = pickBestVideoFile(chosen);
-  return file?.link || null;
+  if (!videos.length) return [];
+  const shuffled = shuffleArray(videos);
+  const links = [];
+  shuffled.forEach((video) => {
+    if (links.length >= limit) return;
+    const file = pickBestVideoFile(video);
+    if (file?.link) links.push(file.link);
+  });
+  return links;
+}
+
+export async function fetchPexelsVideo(query, apiKey) {
+  const links = await fetchPexelsVideos(query, apiKey, 1);
+  return links[0] || null;
 }
 
 export async function fetchPexelsImages(query, apiKey) {
@@ -195,16 +254,26 @@ async function fetchPixabayJson(url) {
   return response.json();
 }
 
-export async function fetchPixabayVideo(query, apiKey) {
+export async function fetchPixabayVideos(query, apiKey, limit = 3) {
   const url = `https://pixabay.com/api/videos/?key=${encodeURIComponent(apiKey)}&q=${encodeURIComponent(
     query
   )}&orientation=vertical&per_page=5`;
   const data = await fetchPixabayJson(url);
   const hits = Array.isArray(data?.hits) ? data.hits : [];
-  if (!hits.length) return null;
-  const chosen = hits[Math.floor(Math.random() * hits.length)];
-  const video = chosen?.videos?.large || chosen?.videos?.medium || chosen?.videos?.small;
-  return video?.url || null;
+  if (!hits.length) return [];
+  const shuffled = shuffleArray(hits);
+  const urls = [];
+  shuffled.forEach((hit) => {
+    if (urls.length >= limit) return;
+    const video = hit?.videos?.large || hit?.videos?.medium || hit?.videos?.small;
+    if (video?.url) urls.push(video.url);
+  });
+  return urls;
+}
+
+export async function fetchPixabayVideo(query, apiKey) {
+  const urls = await fetchPixabayVideos(query, apiKey, 1);
+  return urls[0] || null;
 }
 
 export async function fetchPixabayImages(query, apiKey) {
@@ -259,44 +328,61 @@ export async function fetchStockScenes({ parts, pexelsApiKey, pixabayApiKey, ena
   await ensureDir(tempDir);
 
   const scenes = [];
+  const assetCount = Math.max(1, Number(process.env.SCENE_ASSET_COUNT || "3"));
+  const imageFallbackCount = Math.max(3, Number(process.env.IMAGE_FALLBACK_COUNT || "4"));
+
   for (let i = 0; i < parts.length; i += 1) {
     const text = parts[i]?.text || "";
-    const keywords = extractKeywords(text, 4);
-    const query = keywords.join(" ") || "motivation success";
+    const keywords = extractKeywords(text, 5);
+    const queries = buildQueryVariants(text);
 
-    let videoUrl = null;
-    if (pexelsApiKey) {
-      try {
-        videoUrl = await fetchPexelsVideo(query, pexelsApiKey);
-      } catch (err) {
-        console.warn(`[stock] Pexels video search failed: ${err.message}`);
+    let videoUrls = [];
+    for (const query of queries) {
+      if (pexelsApiKey) {
+        try {
+          videoUrls = videoUrls.concat(await fetchPexelsVideos(query, pexelsApiKey, assetCount));
+        } catch (err) {
+          console.warn(`[stock] Pexels video search failed: ${err.message}`);
+        }
       }
-    }
-    if (!videoUrl && pixabayApiKey) {
-      try {
-        videoUrl = await fetchPixabayVideo(query, pixabayApiKey);
-      } catch (err) {
-        console.warn(`[stock] Pixabay video search failed: ${err.message}`);
+      if (videoUrls.length >= assetCount) break;
+      if (pixabayApiKey) {
+        try {
+          videoUrls = videoUrls.concat(await fetchPixabayVideos(query, pixabayApiKey, assetCount));
+        } catch (err) {
+          console.warn(`[stock] Pixabay video search failed: ${err.message}`);
+        }
       }
+      if (videoUrls.length >= assetCount) break;
     }
 
-    if (videoUrl) {
-      const filePath = await downloadAsset(videoUrl, tempDir, `stock-video-${i + 1}.mp4`);
-      await cacheAsset(filePath);
-      scenes.push({ type: "video", path: filePath, text, keywords, source: "stock" });
+    const uniqueVideos = Array.from(new Set(videoUrls)).slice(0, assetCount);
+    if (uniqueVideos.length) {
+      const paths = [];
+      for (let j = 0; j < uniqueVideos.length; j += 1) {
+        const filePath = await downloadAsset(uniqueVideos[j], tempDir, `stock-video-${i + 1}-${j + 1}.mp4`);
+        await cacheAsset(filePath);
+        paths.push(filePath);
+      }
+      scenes.push({ type: "video", paths, text, keywords, source: "stock" });
       continue;
     }
 
     if (enableImages && (pexelsApiKey || pixabayApiKey)) {
       try {
         let images = [];
-        if (pexelsApiKey) {
-          images = await fetchPexelsImages(query, pexelsApiKey);
+        for (const query of queries) {
+          if (pexelsApiKey) {
+            images = images.concat(await fetchPexelsImages(query, pexelsApiKey));
+          }
+          if (images.length >= imageFallbackCount) break;
+          if (pixabayApiKey) {
+            images = images.concat(await fetchPixabayImages(query, pixabayApiKey));
+          }
+          if (images.length >= imageFallbackCount) break;
         }
-        if (!images.length && pixabayApiKey) {
-          images = await fetchPixabayImages(query, pixabayApiKey);
-        }
-        const selected = images.slice(0, 5);
+
+        const selected = Array.from(new Set(images)).slice(0, imageFallbackCount);
         if (selected.length) {
           const paths = [];
           for (let j = 0; j < selected.length; j += 1) {

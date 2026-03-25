@@ -61,6 +61,14 @@ function randomBetween(min, max) {
   return min + Math.random() * (max - min);
 }
 
+function buildZoomPanExpr({ duration, zoom = 1.12 }) {
+  const frames = Math.max(1, Math.round(duration * 30));
+  const offsetX = randomBetween(-0.15, 0.15);
+  const offsetY = randomBetween(-0.12, 0.12);
+  return `zoompan=z='min(zoom+0.0015,${zoom})':d=${frames}:s=1080x1920:` +
+    `x='iw/2-(iw/zoom/2)+${offsetX}*iw':y='ih/2-(ih/zoom/2)+${offsetY}*ih'`;
+}
+
 function buildExtraEffects({ enabled, includeEq, grade }) {
   if (!enabled) return [];
   const filters = [];
@@ -69,6 +77,8 @@ function buildExtraEffects({ enabled, includeEq, grade }) {
   if (allowVFlip && Math.random() < 0.08) filters.push("vflip");
   if (Math.random() < 0.35) filters.push("vignette");
   if (Math.random() < 0.3) filters.push("unsharp=5:5:0.8:5:5:0.0");
+  const motionBlur = process.env.MOTION_BLUR?.toLowerCase() !== "false";
+  if (motionBlur && Math.random() < 0.6) filters.push("tmix=frames=2:weights='1 1'");
   if (includeEq) {
     const contrast = grade?.contrast ?? randomBetween(0.96, 1.1);
     const brightness = grade?.brightness ?? randomBetween(-0.05, 0.05);
@@ -164,10 +174,17 @@ function buildSubtitleFilters(subtitles, style = {}) {
   const yOffset = Number(style.yOffset) || 220;
   const baseColor = style.fontColor || "white";
   const highlightColor = style.highlightColor || "yellow";
+  const popEnabled = style.popEnabled !== false;
+  const popScale = Number(style.popScale) || 1.18;
+  const popDuration = Number(style.popDuration) || 0.14;
+  const boxEnabled = style.box === true;
+  const boxColor = style.boxColor || "black@0.45";
+  const boxBorder = Number(style.boxBorder || 10);
   const glow = style.glow !== false;
   const shadow = glow ? "shadowcolor=black@0.7:shadowx=2:shadowy=2:" : "";
 
-  return subtitles.map((s) => {
+  const filters = [];
+  subtitles.forEach((s) => {
     const text = escapeDrawtext(s.text || "");
     const start = Number(s.start ?? 0);
     const end = Number(s.end ?? start + 2.5);
@@ -176,8 +193,21 @@ function buildSubtitleFilters(subtitles, style = {}) {
       `if(lt(t,${start + fadeIn}),(t-${start})/${fadeIn},` +
       `if(lt(t,${Math.max(start + fadeIn, end - fadeOut)}),1,` +
       `if(lt(t,${end}),(${end}-t)/${fadeOut},0))))`;
-    return `drawtext=fontsize=${fontSize}:fontcolor=${color}:${shadow}borderw=${outline}:bordercolor=black:line_spacing=10:x=(w-text_w)/2:y=h-${yOffset}:alpha='${alpha}':text='${text}'`;
+    const box = boxEnabled ? `:box=1:boxcolor=${boxColor}:boxborderw=${boxBorder}` : "";
+    filters.push(
+      `drawtext=fontsize=${fontSize}:fontcolor=${color}:${shadow}borderw=${outline}:bordercolor=black` +
+        `${box}:line_spacing=10:x=(w-text_w)/2:y=h-${yOffset}:alpha='${alpha}':text='${text}'`
+    );
+    if (popEnabled) {
+      const popFont = Math.round(fontSize * popScale);
+      const popAlpha = `if(between(t,${start},${start + popDuration}),1,0)`;
+      filters.push(
+        `drawtext=fontsize=${popFont}:fontcolor=${color}:${shadow}borderw=${outline + 1}:bordercolor=black` +
+          `${box}:line_spacing=10:x=(w-text_w)/2:y=h-${yOffset}:alpha='${popAlpha}':text='${text}'`
+      );
+    }
   });
+  return filters;
 }
 
 function buildHookFilter(hookText, style = {}) {
@@ -189,7 +219,8 @@ function buildHookFilter(hookText, style = {}) {
   const glow = style.glow !== false;
   const shadow = glow ? "shadowcolor=black@0.7:shadowx=3:shadowy=3:" : "";
   const alpha = "if(lt(t,0.1),0,if(lt(t,2),1,0))";
-  return `drawtext=fontsize=${fontSize}:fontcolor=white:${shadow}borderw=${outline}:bordercolor=black:x=(w-text_w)/2:y=${yPos}:alpha='${alpha}':text='${safeText}'`;
+  const box = "box=1:boxcolor=black@0.55:boxborderw=14";
+  return `drawtext=fontsize=${fontSize}:fontcolor=white:${shadow}borderw=${outline}:bordercolor=black:${box}:x=(w-text_w)/2:y=${yPos}:alpha='${alpha}':text='${safeText}'`;
 }
 
 function buildKeywordPopups(keywords, duration, style = {}) {
@@ -485,8 +516,9 @@ function buildSceneFilters({ addGradient = true, applyEffects = true, isImage = 
   const frames = Math.max(1, Math.round(duration * 30));
   const zoom = 1.12;
   const enableSceneZoom = process.env.SCENE_ZOOM?.toLowerCase() !== "false";
+  const zoomExpr = buildZoomPanExpr({ duration, zoom });
   const source = isImage || enableSceneZoom
-    ? `[0:v]zoompan=z='min(zoom+0.0015,${zoom})':d=${frames}:s=1080x1920:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'[src];`
+    ? `[0:v]${zoomExpr}[src];`
     : "[0:v]setpts=PTS-STARTPTS[src];";
 
   const extraFilters = buildExtraEffects({ enabled: applyEffects, includeEq: false, grade });
@@ -522,9 +554,8 @@ async function renderSceneVideo({
 }) {
   const buildSimpleFilters = () => {
     if (isImage) {
-      const frames = Math.max(1, Math.round(duration * 30));
       return [
-        `zoompan=z='min(zoom+0.0015,1.12)':d=${frames}:s=1080x1920:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'`,
+        buildZoomPanExpr({ duration, zoom: 1.12 }),
         "scale=1080:1920:force_original_aspect_ratio=increase",
         "crop=1080:1920",
         "format=yuv420p",
@@ -672,9 +703,9 @@ export async function generateStockBaseVideo({ scenes, outDir, totalDuration }) 
   const totalWords = wordCounts.reduce((acc, n) => acc + n, 0) || 1;
 
   const splitDuration = (duration) => {
-    const minCut = Number(process.env.CLIP_MIN_SECONDS || "1.5");
-    const maxCut = Number(process.env.CLIP_MAX_SECONDS || "3");
-    const targetCut = Number(process.env.CLIP_TARGET_SECONDS || "2.3");
+    const minCut = Number(process.env.CLIP_MIN_SECONDS || "1.0");
+    const maxCut = Number(process.env.CLIP_MAX_SECONDS || "2.2");
+    const targetCut = Number(process.env.CLIP_TARGET_SECONDS || "1.6");
     const beatSync = process.env.BEAT_SYNC?.toLowerCase() !== "false";
     const bpm = Number(process.env.MUSIC_BPM || "0");
     const beat = beatSync && Number.isFinite(bpm) && bpm > 30 ? 60 / bpm : 0;
@@ -700,6 +731,20 @@ export async function generateStockBaseVideo({ scenes, outDir, totalDuration }) 
   };
 
   let remaining = totalDuration || 30;
+  const usedAssets = new Set();
+  const pickSceneAsset = (scene) => {
+    const pool = Array.isArray(scene.paths)
+      ? scene.paths
+      : scene.path
+        ? [scene.path]
+        : [];
+    if (!pool.length) return null;
+    const candidates = pool.filter((p) => !usedAssets.has(p));
+    const choice = (candidates.length ? candidates : pool)[Math.floor(Math.random() * (candidates.length || pool.length))];
+    if (choice) usedAssets.add(choice);
+    return choice;
+  };
+
   for (let i = 0; i < scenes.length; i += 1) {
     const scene = scenes[i];
     const portion = wordCounts[i] / totalWords;
@@ -709,7 +754,7 @@ export async function generateStockBaseVideo({ scenes, outDir, totalDuration }) 
     if (scene.type === "images" && Array.isArray(scene.paths) && scene.paths.length) {
       const segments = splitDuration(duration);
       for (let j = 0; j < segments.length; j += 1) {
-        const image = scene.paths[j % scene.paths.length];
+        const image = pickSceneAsset(scene) || scene.paths[j % scene.paths.length];
         const outPath = path.join(outDir, `scene-${i + 1}-${j + 1}.mp4`);
         // eslint-disable-next-line no-await-in-loop
         await renderSceneVideo({
@@ -722,13 +767,15 @@ export async function generateStockBaseVideo({ scenes, outDir, totalDuration }) 
         });
         tempScenes.push(outPath);
       }
-    } else if (scene.type === "video" && scene.path) {
+    } else if (scene.type === "video" && (scene.path || (Array.isArray(scene.paths) && scene.paths.length))) {
       const segments = splitDuration(duration);
       for (let j = 0; j < segments.length; j += 1) {
+        const clip = pickSceneAsset(scene);
+        if (!clip) continue;
         const outPath = path.join(outDir, `scene-${i + 1}-${j + 1}.mp4`);
         // eslint-disable-next-line no-await-in-loop
         await renderSceneVideo({
-          inputPath: scene.path,
+          inputPath: clip,
           duration: segments[j],
           outPath,
           isImage: false,

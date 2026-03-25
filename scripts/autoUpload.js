@@ -82,6 +82,27 @@ function estimateWordsPerSecond() {
   return Number.isFinite(wps) && wps > 0 ? wps : 2.6;
 }
 
+function trimScriptToDuration(script, maxSeconds) {
+  if (!maxSeconds || !script) return script;
+  const wps = estimateWordsPerSecond();
+  const maxWords = Math.max(1, Math.floor(maxSeconds * wps));
+  const words = script.split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) return script;
+
+  const sentences = script.split(/(?<=[.?!])\s+/).map((s) => s.trim()).filter(Boolean);
+  if (sentences.length > 1) {
+    let trimmed = "";
+    for (let i = 0; i < sentences.length; i += 1) {
+      const candidate = trimmed ? `${trimmed} ${sentences[i]}` : sentences[i];
+      if (candidate.split(/\s+/).filter(Boolean).length > maxWords) break;
+      trimmed = candidate;
+    }
+    if (trimmed) return trimmed;
+  }
+
+  return words.slice(0, maxWords).join(" ");
+}
+
 function ensureMinScriptLength(script, minSeconds) {
   if (!minSeconds) return script;
   const wps = estimateWordsPerSecond();
@@ -287,15 +308,24 @@ async function run() {
   const musicFile = musicTracks.length ? musicTracks[Math.floor(Math.random() * musicTracks.length)] : "";
 
   const minDurationEnv = Number(getEnv("MIN_DURATION", ""));
-  const minDuration = Number.isFinite(minDurationEnv) && minDurationEnv > 0 ? minDurationEnv : 0;
+  let minDuration = Number.isFinite(minDurationEnv) && minDurationEnv > 0 ? minDurationEnv : 0;
   const maxDurationEnv = Number(getEnv("MAX_DURATION", ""));
   let maxDuration = Number.isFinite(maxDurationEnv) && maxDurationEnv > 0 ? maxDurationEnv : 0;
+  const viralMode = getEnv("VIRAL_MODE", "true").toLowerCase() !== "false";
+  const scriptDurationEnvRaw = getEnv("SCRIPT_DURATION_SECONDS", "").trim();
+  const hasScriptDuration = scriptDurationEnvRaw !== "";
+
+  if (viralMode) {
+    if (!minDuration) minDuration = 15;
+    if (!maxDuration) maxDuration = 25;
+  }
   if (minDuration && maxDuration && minDuration > maxDuration) {
     maxDuration = minDuration;
   }
-  const targetSecondsRaw = Number(
-    getEnv("SCRIPT_DURATION_SECONDS", maxDuration ? String(maxDuration) : "30")
-  );
+  let targetSecondsRaw = hasScriptDuration ? Number(scriptDurationEnvRaw) : 0;
+  if (!targetSecondsRaw) {
+    targetSecondsRaw = maxDuration || (viralMode ? 20 : 30);
+  }
   const targetSeconds = Math.max(minDuration || 0, targetSecondsRaw || 30);
   const prompt = getEnv(
     "PROMPT",
@@ -425,9 +455,11 @@ async function run() {
     const appendCta = getEnv("APPEND_CTA", "true").toLowerCase() !== "false";
     if (appendCta && needsCta(script)) {
       const cta = pickRandom(ctaList, "Save this and share it.");
-      script = `${script.trim()} ${cta}`.replace(/\s+/g, " ").trim();
-    }
-    script = ensureMinScriptLength(script, minDurationFinal);
+        script = `${script.trim()} ${cta}`.replace(/\s+/g, " ").trim();
+      }
+      const maxScriptSeconds = maxDurationFinal || (viralMode ? 25 : 0);
+      script = trimScriptToDuration(script, maxScriptSeconds);
+      script = ensureMinScriptLength(script, minDurationFinal);
 
     if (useAiMetadata) {
       try {
@@ -612,11 +644,17 @@ async function run() {
     const hookMaxWords = Number(getEnv("HOOK_MAX_WORDS", "10")) || 10;
     const hookUpper = getEnv("HOOK_UPPERCASE", "true").toLowerCase() !== "false";
     const subtitleStyle = {
-      fontSize: Math.round(randomBetween(58, 72)),
-      outline: Math.round(randomBetween(3, 6)),
-      yOffset: Math.round(randomBetween(180, 320)),
+      fontSize: Math.round(randomBetween(60, 78)),
+      outline: Math.round(randomBetween(4, 7)),
+      yOffset: Math.round(randomBetween(170, 300)),
       fontColor: "white",
       highlightColor: pickRandom(["yellow", "cyan", "lime"], "yellow"),
+      popEnabled: true,
+      popScale: randomBetween(1.15, 1.28),
+      popDuration: randomBetween(0.1, 0.16),
+      box: Math.random() < 0.45,
+      boxColor: "black@0.45",
+      boxBorder: Math.round(randomBetween(8, 12)),
     };
     subtitleStyle.glow = getEnv("TEXT_GLOW", "true").toLowerCase() !== "false";
     const hookTextRaw = (script.split(/(?<=[.?!])\s+/)[0] || script)
@@ -626,8 +664,8 @@ async function run() {
       .trim();
     const hookText = hookUpper ? hookTextRaw.toUpperCase() : hookTextRaw;
     const hookBoost = getEnv("HOOK_BOOST", "true").toLowerCase() !== "false";
-    subtitleStyle.hookSize = hookBoost ? Math.round(subtitleStyle.fontSize * 1.55) : Math.round(subtitleStyle.fontSize * 1.25);
-    subtitleStyle.hookOutline = hookBoost ? Math.round(subtitleStyle.outline * 2.2) : Math.round(subtitleStyle.outline * 1.6);
+    subtitleStyle.hookSize = hookBoost ? Math.round(subtitleStyle.fontSize * 1.85) : Math.round(subtitleStyle.fontSize * 1.4);
+    subtitleStyle.hookOutline = hookBoost ? Math.round(subtitleStyle.outline * 2.6) : Math.round(subtitleStyle.outline * 1.8);
     subtitleStyle.hookY = Math.round(randomBetween(110, 180));
 
     const musicVolume = Number(getEnv("MUSIC_VOLUME", "0.18"));
