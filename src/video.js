@@ -414,21 +414,29 @@ async function renderSceneVideo({
   } catch (err) {
     if (addGradient) {
       console.warn("[video] Gradient overlay failed, retrying without gradient.");
-      return runWithFilters({
-        inputOptions,
-        useComplex: true,
-        withGradient: false,
-        withEffects: applyEffects,
-      });
+      try {
+        return await runWithFilters({
+          inputOptions,
+          useComplex: true,
+          withGradient: false,
+          withEffects: applyEffects,
+        });
+      } catch (innerErr) {
+        err = innerErr;
+      }
     }
     if (applyEffects) {
       console.warn("[video] Effect filters failed, retrying without effects.");
-      return runWithFilters({
-        inputOptions,
-        useComplex: true,
-        withGradient: false,
-        withEffects: false,
-      });
+      try {
+        return await runWithFilters({
+          inputOptions,
+          useComplex: true,
+          withGradient: false,
+          withEffects: false,
+        });
+      } catch (innerErr) {
+        err = innerErr;
+      }
     }
     console.warn("[video] Complex filters failed, retrying with simple filters.");
     return runWithFilters({
