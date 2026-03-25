@@ -73,6 +73,10 @@ function pickRandom(list, fallback = "") {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+function needsCta(text) {
+  return !/(subscribe|follow|share|save|comment|like)/i.test(text || "");
+}
+
 function pickDailyTopic(topics) {
   if (!topics.length) return "";
   const today = new Date();
@@ -355,6 +359,18 @@ async function run() {
       throw lastError;
     }
 
+    const ctaList = parseCsv(
+      getEnv(
+        "CTA_LIST",
+        "Save this. Share it.,Follow for more daily motivation.,Subscribe for more success mindset tips."
+      )
+    );
+    const appendCta = getEnv("APPEND_CTA", "true").toLowerCase() !== "false";
+    if (appendCta && needsCta(script)) {
+      const cta = pickRandom(ctaList, "Save this and share it.");
+      script = `${script.trim()} ${cta}`.replace(/\s+/g, " ").trim();
+    }
+
     if (useAiMetadata) {
       try {
         log("Generating metadata");
@@ -416,7 +432,19 @@ async function run() {
       if (!pexelsApiKey && !pixabayApiKey) {
         throw new Error("ENABLE_STOCK_VIDEO is true but no stock API key is set (PEXELS_API_KEY or PIXABAY_API_KEY).");
       }
-      const parts = splitScriptIntoParts(script);
+      let parts = splitScriptIntoParts(script);
+      const surpriseEnabled = getEnv("SURPRISE_BROLL", "true").toLowerCase() !== "false";
+      if (surpriseEnabled) {
+        const surpriseTopics = parseCsv(
+          getEnv(
+            "SURPRISE_TOPICS",
+            "city night, ocean waves, sunrise, mountain peak, neon skyline, athlete training"
+          )
+        );
+        if (surpriseTopics.length && parts.length < 5) {
+          parts = [...parts, { text: pickRandom(surpriseTopics) }];
+        }
+      }
       log(`Fetching stock visuals for ${parts.length} scenes`);
       const scenes = await fetchStockScenes({
         parts,
@@ -515,6 +543,10 @@ async function run() {
         : path.join(musicDir, musicFile)
       : null;
     const highlightWords = highlightEnabled ? extractKeywords(script, 6) : [];
+    const popupEnabled = getEnv("KEYWORD_POPUPS", "true").toLowerCase() !== "false";
+    const keywordPopups = popupEnabled ? extractKeywords(script, 8).slice(0, 3) : [];
+    const hookMaxWords = Number(getEnv("HOOK_MAX_WORDS", "10")) || 10;
+    const hookUpper = getEnv("HOOK_UPPERCASE", "true").toLowerCase() !== "false";
     const subtitleStyle = {
       fontSize: Math.round(randomBetween(58, 72)),
       outline: Math.round(randomBetween(3, 6)),
@@ -522,7 +554,19 @@ async function run() {
       fontColor: "white",
       highlightColor: pickRandom(["yellow", "cyan", "lime"], "yellow"),
     };
-    const hookText = (script.split(/(?<=[.?!])\s+/)[0] || script).split(" ").slice(0, 10).join(" ").trim();
+    const hookTextRaw = (script.split(/(?<=[.?!])\s+/)[0] || script)
+      .split(" ")
+      .slice(0, hookMaxWords)
+      .join(" ")
+      .trim();
+    const hookText = hookUpper ? hookTextRaw.toUpperCase() : hookTextRaw;
+    const hookBoost = getEnv("HOOK_BOOST", "true").toLowerCase() !== "false";
+    subtitleStyle.hookSize = hookBoost ? Math.round(subtitleStyle.fontSize * 1.55) : Math.round(subtitleStyle.fontSize * 1.25);
+    subtitleStyle.hookOutline = hookBoost ? Math.round(subtitleStyle.outline * 2.2) : Math.round(subtitleStyle.outline * 1.6);
+    subtitleStyle.hookY = Math.round(randomBetween(110, 180));
+
+    const musicVolume = Number(getEnv("MUSIC_VOLUME", "0.18"));
+    const watermarkText = getEnv("WATERMARK_TEXT", "").trim();
 
     videoPath = await generateVideo({
       baseVideoPath: basePath,
@@ -532,10 +576,13 @@ async function run() {
       title,
       musicPath,
       maxDuration: maxDurationFinal,
+      musicVolume: Number.isFinite(musicVolume) ? musicVolume : 0.18,
       subtitleMode,
       highlightWords,
       subtitleStyle,
       hookText,
+      keywordPopups,
+      watermarkText,
     });
   } catch (err) {
     log(`Video generation failed: ${err.message}`);

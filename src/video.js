@@ -55,7 +55,7 @@ function randomBetween(min, max) {
   return min + Math.random() * (max - min);
 }
 
-function buildExtraEffects({ enabled, includeEq }) {
+function buildExtraEffects({ enabled, includeEq, grade }) {
   if (!enabled) return [];
   const filters = [];
   if (Math.random() < 0.35) filters.push("hflip");
@@ -64,12 +64,33 @@ function buildExtraEffects({ enabled, includeEq }) {
   if (Math.random() < 0.35) filters.push("vignette");
   if (Math.random() < 0.3) filters.push("unsharp=5:5:0.8:5:5:0.0");
   if (includeEq) {
-    const contrast = randomBetween(0.96, 1.1);
-    const brightness = randomBetween(-0.05, 0.05);
-    const saturation = randomBetween(0.9, 1.15);
+    const contrast = grade?.contrast ?? randomBetween(0.96, 1.1);
+    const brightness = grade?.brightness ?? randomBetween(-0.05, 0.05);
+    const saturation = grade?.saturation ?? randomBetween(0.9, 1.15);
     filters.push(`eq=contrast=${contrast}:brightness=${brightness}:saturation=${saturation}`);
   }
   return filters;
+}
+
+function pickColorGradePreset() {
+  const presetRaw = (process.env.COLOR_GRADE_PRESET || "auto").toLowerCase();
+  const presets = ["warm", "cool", "vivid", "cinematic", "punchy", "soft"];
+  const preset = presetRaw === "auto" ? presets[Math.floor(Math.random() * presets.length)] : presetRaw;
+  switch (preset) {
+    case "warm":
+      return { contrast: 1.08, brightness: 0.02, saturation: 1.18 };
+    case "cool":
+      return { contrast: 1.04, brightness: -0.01, saturation: 1.05 };
+    case "cinematic":
+      return { contrast: 1.1, brightness: -0.02, saturation: 0.95 };
+    case "punchy":
+      return { contrast: 1.16, brightness: 0.03, saturation: 1.25 };
+    case "soft":
+      return { contrast: 0.98, brightness: 0.02, saturation: 0.95 };
+    case "vivid":
+    default:
+      return { contrast: 1.12, brightness: 0.01, saturation: 1.22 };
+  }
 }
 
 function buildTimedSubtitles(script, totalDuration, options = {}) {
@@ -161,6 +182,32 @@ function buildHookFilter(hookText, style = {}) {
   return `drawtext=fontsize=${fontSize}:fontcolor=white:borderw=${outline}:bordercolor=black:x=(w-text_w)/2:y=${yPos}:alpha='${alpha}':text='${safeText}'`;
 }
 
+function buildKeywordPopups(keywords, duration, style = {}) {
+  if (!Array.isArray(keywords) || keywords.length === 0 || !duration) return [];
+  const maxPopups = Math.min(3, keywords.length);
+  const interval = duration / (maxPopups + 1);
+  const fontSize = Number(style.popupSize) || 70;
+  const outline = Number(style.popupOutline) || 6;
+  const color = style.popupColor || "white";
+  const popups = [];
+  for (let i = 0; i < maxPopups; i += 1) {
+    const start = Math.max(0.5, interval * (i + 1) - 0.4);
+    const end = Math.min(duration, start + 0.9);
+    const text = escapeDrawtext(String(keywords[i]).toUpperCase());
+    const alpha = `if(between(t,${start},${end}),1,0)`;
+    popups.push(
+      `drawtext=fontsize=${fontSize}:fontcolor=${color}:borderw=${outline}:bordercolor=black:x=(w-text_w)/2:y=h-420:alpha='${alpha}':text='${text}'`
+    );
+  }
+  return popups;
+}
+
+function buildWatermarkFilter(text) {
+  if (!text) return "";
+  const safe = escapeDrawtext(text);
+  return `drawtext=fontsize=32:fontcolor=white@0.6:borderw=2:bordercolor=black@0.6:x=w-text_w-24:y=h-text_h-24:text='${safe}'`;
+}
+
 function shouldRetryWithoutSubtitles(err) {
   const message = `${err?.message || ""} ${err?.stderr || ""}`.toLowerCase();
   return (
@@ -184,6 +231,8 @@ export async function generateVideo({
   subtitleMode,
   highlightWords,
   hookText,
+  keywordPopups,
+  watermarkText,
 }) {
   const safeTitle = sanitizeTitle(title);
   const outputFileName = `${safeTitle || "short"}-${Date.now()}.mp4`;
@@ -207,21 +256,34 @@ export async function generateVideo({
     });
   }
 
+  const colorGrade = pickColorGradePreset();
   const subtitleFilters = buildSubtitleFilters(computedSubtitles, subtitleStyle);
   const hookFilter = buildHookFilter(hookText, subtitleStyle);
+  const popupFilters = buildKeywordPopups(
+    Array.isArray(keywordPopups) ? keywordPopups : [],
+    audioDuration,
+    subtitleStyle
+  );
+  const watermarkFilter = buildWatermarkFilter(watermarkText);
   const extraEffectsEnabled = process.env.EXTRA_EFFECTS?.toLowerCase() !== "false";
-  const extraFilters = buildExtraEffects({ enabled: extraEffectsEnabled, includeEq: true });
+  const gradeFilter = extraEffectsEnabled
+    ? `eq=contrast=${colorGrade.contrast}:brightness=${colorGrade.brightness}:saturation=${colorGrade.saturation}`
+    : "";
+  const extraFilters = buildExtraEffects({ enabled: extraEffectsEnabled, includeEq: false, grade: colorGrade });
   const baseFilters = [
     "scale=1080:1920:force_original_aspect_ratio=increase",
     "crop=1080:1920",
     "setsar=1",
   ];
   const videoFilters = baseFilters
+    .concat(gradeFilter ? [gradeFilter] : [])
     .concat(extraFilters)
     .concat(subtitleFilters)
-    .concat(hookFilter ? [hookFilter] : []);
+    .concat(hookFilter ? [hookFilter] : [])
+    .concat(popupFilters)
+    .concat(watermarkFilter ? [watermarkFilter] : []);
 
-  const runFfmpeg = (filters) =>
+  const runFfmpeg = (filters, enableDucking = true) =>
     new Promise((resolve, reject) => {
       const baseInputOptions = [];
       if (startOffset > 0) {
@@ -249,9 +311,18 @@ export async function generateVideo({
       const complexFilters = [];
       const bgVolume = typeof musicVolume === "number" ? musicVolume : 0.18;
       if (voicePath && musicPath) {
-        complexFilters.push("[1:a]volume=1.0[voice]");
-        complexFilters.push(`[2:a]volume=${bgVolume}[music]`);
-        complexFilters.push("[voice][music]amix=inputs=2:duration=first:dropout_transition=0[aout]");
+        const ducking = enableDucking && process.env.AUDIO_DUCKING?.toLowerCase() !== "false";
+        if (ducking) {
+          complexFilters.push("[1:a]volume=1.0[voice]");
+          complexFilters.push("[2:a]volume=1.0[music]");
+          complexFilters.push("[music][voice]sidechaincompress=threshold=0.05:ratio=8:attack=20:release=200[ducked]");
+          complexFilters.push(`[ducked]volume=${bgVolume}[duckedmix]`);
+          complexFilters.push("[voice][duckedmix]amix=inputs=2:duration=first:dropout_transition=0[aout]");
+        } else {
+          complexFilters.push("[1:a]volume=1.0[voice]");
+          complexFilters.push(`[2:a]volume=${bgVolume}[music]`);
+          complexFilters.push("[voice][music]amix=inputs=2:duration=first:dropout_transition=0[aout]");
+        }
         maps.push("[aout]");
       } else if (voicePath) {
         maps.push("1:a");
@@ -288,11 +359,19 @@ export async function generateVideo({
     });
 
   try {
-    return await runFfmpeg(videoFilters);
+    return await runFfmpeg(videoFilters, true);
   } catch (err) {
+    if (process.env.AUDIO_DUCKING?.toLowerCase() !== "false") {
+      console.warn("[video] Audio ducking failed, retrying without ducking.");
+      try {
+        return await runFfmpeg(videoFilters, false);
+      } catch (innerErr) {
+        err = innerErr;
+      }
+    }
     if (subtitleFilters.length && shouldRetryWithoutSubtitles(err)) {
       console.warn("[video] Subtitles filter failed. Retrying without subtitles.");
-      return runFfmpeg(baseFilters);
+      return runFfmpeg(baseFilters, false);
     }
     throw err;
   }
@@ -301,9 +380,10 @@ export async function generateVideo({
 export { getMediaDuration };
 
 function buildSceneFilters({ addGradient = true, applyEffects = true, isImage = false, duration = 3 } = {}) {
-  const contrast = applyEffects ? randomBetween(0.95, 1.1) : 1;
-  const brightness = applyEffects ? randomBetween(-0.04, 0.04) : 0;
-  const saturation = applyEffects ? randomBetween(0.9, 1.15) : 1;
+  const grade = pickColorGradePreset();
+  const contrast = applyEffects ? grade.contrast : 1;
+  const brightness = applyEffects ? grade.brightness : 0;
+  const saturation = applyEffects ? grade.saturation : 1;
 
   const blur = "boxblur=20:1";
   const base = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920";
@@ -315,7 +395,7 @@ function buildSceneFilters({ addGradient = true, applyEffects = true, isImage = 
     ? `[0:v]zoompan=z='min(zoom+0.0015,${zoom})':d=${frames}:s=1080x1920:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'[src];`
     : "[0:v]setpts=PTS-STARTPTS[src];";
 
-  const extraFilters = buildExtraEffects({ enabled: applyEffects, includeEq: false });
+  const extraFilters = buildExtraEffects({ enabled: applyEffects, includeEq: false, grade });
   let chain =
     source +
     `[src]${base},${blur}[bg];` +
@@ -501,6 +581,9 @@ export async function generateStockBaseVideo({ scenes, outDir, totalDuration }) 
     const minCut = Number(process.env.CLIP_MIN_SECONDS || "1.5");
     const maxCut = Number(process.env.CLIP_MAX_SECONDS || "3");
     const targetCut = Number(process.env.CLIP_TARGET_SECONDS || "2.3");
+    const beatSync = process.env.BEAT_SYNC?.toLowerCase() !== "false";
+    const bpm = Number(process.env.MUSIC_BPM || "0");
+    const beat = beatSync && Number.isFinite(bpm) && bpm > 30 ? 60 / bpm : 0;
     let segments = Math.max(1, Math.round(duration / targetCut));
     segments = Math.max(segments, Math.ceil(duration / maxCut));
     segments = Math.min(segments, Math.max(1, Math.floor(duration / minCut)));
@@ -511,7 +594,11 @@ export async function generateStockBaseVideo({ scenes, outDir, totalDuration }) 
       const remainingSegs = segments - i;
       const minAllowed = Math.max(minCut, remaining - maxCut * (remainingSegs - 1));
       const maxAllowed = Math.min(maxCut, remaining - minCut * (remainingSegs - 1));
-      const seg = i === segments - 1 ? remaining : randomBetween(minAllowed, maxAllowed);
+      let seg = i === segments - 1 ? remaining : randomBetween(minAllowed, maxAllowed);
+      if (beat) {
+        const beats = Math.max(1, Math.round(seg / beat));
+        seg = Math.min(maxAllowed, Math.max(minAllowed, beats * beat));
+      }
       parts.push(seg);
       remaining -= seg;
     }
