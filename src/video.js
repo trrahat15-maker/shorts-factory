@@ -338,6 +338,7 @@ async function renderSceneVideo({
   addGradient = true,
   applyEffects = true,
 }) {
+<<<<<<< HEAD
   const runRender = (withGradient, withEffects) =>
     new Promise((resolve, reject) => {
       const command = ffmpeg();
@@ -359,6 +360,50 @@ async function renderSceneVideo({
         .outputOptions([
           "-map",
           "[v0]",
+=======
+  const buildSimpleFilters = () => {
+    if (isImage) {
+      const frames = Math.max(1, Math.round(duration * 30));
+      return [
+        `zoompan=z='min(zoom+0.0015,1.12)':d=${frames}:s=1080x1920:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'`,
+        "scale=1080:1920:force_original_aspect_ratio=increase",
+        "crop=1080:1920",
+        "format=yuv420p",
+      ];
+    }
+    return [
+      "scale=1080:1920:force_original_aspect_ratio=increase",
+      "crop=1080:1920",
+      "format=yuv420p",
+    ];
+  };
+
+  const runWithFilters = ({ inputOptions, useComplex, withGradient, withEffects }) =>
+    new Promise((resolve, reject) => {
+      const command = ffmpeg();
+      const baseInputOptions = inputOptions || [];
+      if (isImage) {
+        command.input(inputPath).inputOptions(["-loop", "1", ...baseInputOptions]);
+      } else {
+        command.input(inputPath).inputOptions([...baseInputOptions, "-stream_loop", "-1"]);
+      }
+
+      if (useComplex) {
+        const sceneFilter = buildSceneFilters({
+          addGradient: withGradient,
+          applyEffects: withEffects,
+          isImage,
+          duration,
+        });
+        command.complexFilter(sceneFilter);
+        command.outputOptions(["-map", "[v0]"]);
+      } else {
+        command.videoFilters(buildSimpleFilters().join(","));
+      }
+
+      command
+        .outputOptions([
+>>>>>>> 49fcae1 (Add safe fallback for scene filters)
           "-preset",
           "veryfast",
           "-crf",
@@ -376,6 +421,7 @@ async function renderSceneVideo({
         .run();
     });
 
+<<<<<<< HEAD
   try {
     if (!isImage) {
       const inputDuration = await getMediaDuration(inputPath);
@@ -429,6 +475,48 @@ async function renderSceneVideo({
       return runRender(false, false);
     }
     throw err;
+=======
+  const inputDuration = !isImage ? await getMediaDuration(inputPath) : null;
+  const startOffset =
+    inputDuration && inputDuration > duration + 0.5
+      ? Math.random() * Math.max(0, inputDuration - duration - 0.5)
+      : 0;
+  const inputOptions = startOffset > 0 ? ["-ss", `${startOffset}`] : [];
+
+  try {
+    return await runWithFilters({
+      inputOptions,
+      useComplex: true,
+      withGradient: addGradient,
+      withEffects: applyEffects,
+    });
+  } catch (err) {
+    if (addGradient) {
+      console.warn("[video] Gradient overlay failed, retrying without gradient.");
+      return runWithFilters({
+        inputOptions,
+        useComplex: true,
+        withGradient: false,
+        withEffects: applyEffects,
+      });
+    }
+    if (applyEffects) {
+      console.warn("[video] Effect filters failed, retrying without effects.");
+      return runWithFilters({
+        inputOptions,
+        useComplex: true,
+        withGradient: false,
+        withEffects: false,
+      });
+    }
+    console.warn("[video] Complex filters failed, retrying with simple filters.");
+    return runWithFilters({
+      inputOptions,
+      useComplex: false,
+      withGradient: false,
+      withEffects: false,
+    });
+>>>>>>> 49fcae1 (Add safe fallback for scene filters)
   }
 }
 
