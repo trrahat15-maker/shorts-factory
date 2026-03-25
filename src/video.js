@@ -158,6 +158,8 @@ function buildSubtitleFilters(subtitles, style = {}) {
   const yOffset = Number(style.yOffset) || 220;
   const baseColor = style.fontColor || "white";
   const highlightColor = style.highlightColor || "yellow";
+  const glow = style.glow !== false;
+  const shadow = glow ? "shadowcolor=black@0.7:shadowx=2:shadowy=2:" : "";
 
   return subtitles.map((s) => {
     const text = escapeDrawtext(s.text || "");
@@ -168,7 +170,7 @@ function buildSubtitleFilters(subtitles, style = {}) {
       `if(lt(t,${start + fadeIn}),(t-${start})/${fadeIn},` +
       `if(lt(t,${Math.max(start + fadeIn, end - fadeOut)}),1,` +
       `if(lt(t,${end}),(${end}-t)/${fadeOut},0))))`;
-    return `drawtext=fontsize=${fontSize}:fontcolor=${color}:borderw=${outline}:bordercolor=black:line_spacing=10:x=(w-text_w)/2:y=h-${yOffset}:alpha='${alpha}':text='${text}'`;
+    return `drawtext=fontsize=${fontSize}:fontcolor=${color}:${shadow}borderw=${outline}:bordercolor=black:line_spacing=10:x=(w-text_w)/2:y=h-${yOffset}:alpha='${alpha}':text='${text}'`;
   });
 }
 
@@ -178,8 +180,10 @@ function buildHookFilter(hookText, style = {}) {
   const fontSize = Number(style.hookSize) || 88;
   const outline = Number(style.hookOutline) || 6;
   const yPos = Number(style.hookY) || 140;
+  const glow = style.glow !== false;
+  const shadow = glow ? "shadowcolor=black@0.7:shadowx=3:shadowy=3:" : "";
   const alpha = "if(lt(t,0.1),0,if(lt(t,2),1,0))";
-  return `drawtext=fontsize=${fontSize}:fontcolor=white:borderw=${outline}:bordercolor=black:x=(w-text_w)/2:y=${yPos}:alpha='${alpha}':text='${safeText}'`;
+  return `drawtext=fontsize=${fontSize}:fontcolor=white:${shadow}borderw=${outline}:bordercolor=black:x=(w-text_w)/2:y=${yPos}:alpha='${alpha}':text='${safeText}'`;
 }
 
 function buildKeywordPopups(keywords, duration, style = {}) {
@@ -189,6 +193,8 @@ function buildKeywordPopups(keywords, duration, style = {}) {
   const fontSize = Number(style.popupSize) || 70;
   const outline = Number(style.popupOutline) || 6;
   const color = style.popupColor || "white";
+  const glow = style.glow !== false;
+  const shadow = glow ? "shadowcolor=black@0.7:shadowx=3:shadowy=3:" : "";
   const popups = [];
   for (let i = 0; i < maxPopups; i += 1) {
     const start = Math.max(0.5, interval * (i + 1) - 0.4);
@@ -196,7 +202,7 @@ function buildKeywordPopups(keywords, duration, style = {}) {
     const text = escapeDrawtext(String(keywords[i]).toUpperCase());
     const alpha = `if(between(t,${start},${end}),1,0)`;
     popups.push(
-      `drawtext=fontsize=${fontSize}:fontcolor=${color}:borderw=${outline}:bordercolor=black:x=(w-text_w)/2:y=h-420:alpha='${alpha}':text='${text}'`
+      `drawtext=fontsize=${fontSize}:fontcolor=${color}:${shadow}borderw=${outline}:bordercolor=black:x=(w-text_w)/2:y=h-420:alpha='${alpha}':text='${text}'`
     );
   }
   return popups;
@@ -205,7 +211,7 @@ function buildKeywordPopups(keywords, duration, style = {}) {
 function buildWatermarkFilter(text) {
   if (!text) return "";
   const safe = escapeDrawtext(text);
-  return `drawtext=fontsize=32:fontcolor=white@0.6:borderw=2:bordercolor=black@0.6:x=w-text_w-24:y=h-text_h-24:text='${safe}'`;
+  return `drawtext=fontsize=32:fontcolor=white@0.6:shadowcolor=black@0.5:shadowx=2:shadowy=2:borderw=1:bordercolor=black@0.6:x=w-text_w-24:y=h-text_h-24:text='${safe}'`;
 }
 
 function shouldRetryWithoutSubtitles(err) {
@@ -265,6 +271,10 @@ export async function generateVideo({
     subtitleStyle
   );
   const watermarkFilter = buildWatermarkFilter(watermarkText);
+  const coldOpen = process.env.COLD_OPEN?.toLowerCase() !== "false";
+  const coldOpenFilter = coldOpen
+    ? "eq=brightness=0.18:enable='lt(t,0.25)'"
+    : "";
   const extraEffectsEnabled = process.env.EXTRA_EFFECTS?.toLowerCase() !== "false";
   const gradeFilter = extraEffectsEnabled
     ? `eq=contrast=${colorGrade.contrast}:brightness=${colorGrade.brightness}:saturation=${colorGrade.saturation}`
@@ -276,6 +286,7 @@ export async function generateVideo({
     "setsar=1",
   ];
   const videoFilters = baseFilters
+    .concat(coldOpenFilter ? [coldOpenFilter] : [])
     .concat(gradeFilter ? [gradeFilter] : [])
     .concat(extraFilters)
     .concat(subtitleFilters)
@@ -312,20 +323,36 @@ export async function generateVideo({
       const bgVolume = typeof musicVolume === "number" ? musicVolume : 0.18;
       if (voicePath && musicPath) {
         const ducking = enableDucking && process.env.AUDIO_DUCKING?.toLowerCase() !== "false";
+        const trimSilence = process.env.TRIM_SILENCE?.toLowerCase() !== "false";
+        const silenceThresh = process.env.SILENCE_THRESHOLD || "-30dB";
+        const silenceDuration = process.env.SILENCE_DURATION || "0.2";
+        const voiceFilter = trimSilence
+          ? `silenceremove=start_periods=1:start_duration=${silenceDuration}:start_threshold=${silenceThresh}:stop_periods=1:stop_duration=${silenceDuration}:stop_threshold=${silenceThresh}`
+          : "anull";
         if (ducking) {
-          complexFilters.push("[1:a]volume=1.0[voice]");
+          complexFilters.push(`[1:a]${voiceFilter},volume=1.0[voice]`);
           complexFilters.push("[2:a]volume=1.0[music]");
           complexFilters.push("[music][voice]sidechaincompress=threshold=0.05:ratio=8:attack=20:release=200[ducked]");
           complexFilters.push(`[ducked]volume=${bgVolume}[duckedmix]`);
           complexFilters.push("[voice][duckedmix]amix=inputs=2:duration=first:dropout_transition=0[aout]");
         } else {
-          complexFilters.push("[1:a]volume=1.0[voice]");
+          complexFilters.push(`[1:a]${voiceFilter},volume=1.0[voice]`);
           complexFilters.push(`[2:a]volume=${bgVolume}[music]`);
           complexFilters.push("[voice][music]amix=inputs=2:duration=first:dropout_transition=0[aout]");
         }
         maps.push("[aout]");
       } else if (voicePath) {
-        maps.push("1:a");
+        const trimSilence = process.env.TRIM_SILENCE?.toLowerCase() !== "false";
+        const silenceThresh = process.env.SILENCE_THRESHOLD || "-30dB";
+        const silenceDuration = process.env.SILENCE_DURATION || "0.2";
+        if (trimSilence) {
+          complexFilters.push(
+            `[1:a]silenceremove=start_periods=1:start_duration=${silenceDuration}:start_threshold=${silenceThresh}:stop_periods=1:stop_duration=${silenceDuration}:stop_threshold=${silenceThresh}[aout]`
+          );
+          maps.push("[aout]");
+        } else {
+          maps.push("1:a");
+        }
       } else if (musicPath) {
         complexFilters.push(`[1:a]volume=${bgVolume}[aout]`);
         maps.push("[aout]");
@@ -346,6 +373,10 @@ export async function generateVideo({
         "-shortest",
         "-r 30",
       ];
+      const limiter = process.env.AUDIO_LIMITER?.toLowerCase() !== "false";
+      if (limiter) {
+        command.audioFilters("alimiter=limit=0.95");
+      }
       command.outputOptions(outputOptions);
       if (maxDuration) {
         command.outputOptions(["-t", `${Number(maxDuration)}`]);
@@ -391,7 +422,8 @@ function buildSceneFilters({ addGradient = true, applyEffects = true, isImage = 
 
   const frames = Math.max(1, Math.round(duration * 30));
   const zoom = 1.12;
-  const source = isImage
+  const enableSceneZoom = process.env.SCENE_ZOOM?.toLowerCase() !== "false";
+  const source = isImage || enableSceneZoom
     ? `[0:v]zoompan=z='min(zoom+0.0015,${zoom})':d=${frames}:s=1080x1920:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'[src];`
     : "[0:v]setpts=PTS-STARTPTS[src];";
 

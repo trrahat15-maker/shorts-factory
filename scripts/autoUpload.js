@@ -77,6 +77,26 @@ function needsCta(text) {
   return !/(subscribe|follow|share|save|comment|like)/i.test(text || "");
 }
 
+function polishTitle(input) {
+  if (!input) return input;
+  let title = String(input).trim();
+  title = title.replace(/[.]+$/, "").trim();
+  if (title.length > 1) {
+    title = title[0].toUpperCase() + title.slice(1);
+  }
+  const prefixes = parseCsv(getEnv("TITLE_PREFIXES", "Stop,Start,How to,Why,The Secret,One Rule"));
+  if (title.length < 24 && prefixes.length) {
+    const prefix = pickRandom(prefixes);
+    if (!title.toLowerCase().startsWith(prefix.toLowerCase())) {
+      title = `${prefix} ${title}`;
+    }
+  }
+  if (title.length > 90) {
+    title = `${title.slice(0, 87).trim()}...`;
+  }
+  return title;
+}
+
 function pickDailyTopic(topics) {
   if (!topics.length) return "";
   const today = new Date();
@@ -395,6 +415,10 @@ async function run() {
     if (!title) {
       title = buildTitleFromScript(script);
     }
+    const titlePolish = getEnv("TITLE_POLISH", "true").toLowerCase() !== "false";
+    if (titlePolish) {
+      title = polishTitle(title);
+    }
     if (!description) {
       description = defaultDescription;
     }
@@ -554,6 +578,7 @@ async function run() {
       fontColor: "white",
       highlightColor: pickRandom(["yellow", "cyan", "lime"], "yellow"),
     };
+    subtitleStyle.glow = getEnv("TEXT_GLOW", "true").toLowerCase() !== "false";
     const hookTextRaw = (script.split(/(?<=[.?!])\s+/)[0] || script)
       .split(" ")
       .slice(0, hookMaxWords)
