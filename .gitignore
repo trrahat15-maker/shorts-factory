@@ -5,6 +5,10 @@ data/
 uploads/
 .env
 .env.*
+.env.local
+*.key
+*.pem
+credentials.json
 .DS_Store
 Thumbs.db
 *.log

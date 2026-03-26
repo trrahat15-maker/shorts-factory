@@ -47,6 +47,27 @@ await ensureStorage(TEMP_DIR);
 await ensureStorage(WORK_DIR);
 await ensureLocalDirs();
 
+const APP_TOKEN = (process.env.APP_ACCESS_TOKEN || "").trim();
+const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX || "120");
+const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || "60000");
+const rateBuckets = new Map();
+
+function rateLimit(req, res, next) {
+  const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown";
+  const now = Date.now();
+  const bucket = rateBuckets.get(ip) || { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+  if (now > bucket.resetAt) {
+    bucket.count = 0;
+    bucket.resetAt = now + RATE_LIMIT_WINDOW_MS;
+  }
+  bucket.count += 1;
+  rateBuckets.set(ip, bucket);
+  if (bucket.count > RATE_LIMIT_MAX) {
+    return res.status(429).json({ error: "Rate limit exceeded. Try again later." });
+  }
+  return next();
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
@@ -54,21 +75,18 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "frontend")));
 
 app.use("/api", async (req, res, next) => {
-  const bypass =
-    req.path === "/health" ||
-    req.path === "/youtube/callback" ||
-    (req.path === "/config" && req.method === "GET");
+  const bypass = req.path === "/health" || req.path === "/youtube/callback";
   if (bypass) return next();
 
-  const config = await getConfig();
-  const token = (config.appAccessToken || "").trim();
-  if (!token) return next();
+  if (!APP_TOKEN) {
+    return res.status(401).json({ error: "Server locked. Set APP_ACCESS_TOKEN to enable API access." });
+  }
 
   const provided = req.headers["x-app-token"];
-  if (provided !== token) {
+  if (provided !== APP_TOKEN) {
     return res.status(401).json({ error: "Unauthorized. Invalid access token." });
   }
-  return next();
+  return rateLimit(req, res, next);
 });
 
 const baseUpload = multer({ dest: TEMP_DIR });
@@ -86,57 +104,60 @@ app.get("/api/config", async (req, res) => {
 app.post("/api/config", async (req, res) => {
   const config = req.body || {};
   const existing = await getConfig();
-  const existingToken = (existing.appAccessToken || "").trim();
-  if (existingToken) {
-    const provided = req.headers["x-app-token"];
-    if (provided !== existingToken) {
-      return res.status(401).json({ error: "Unauthorized. Invalid access token." });
-    }
-  }
-  await setConfig({ ...existing, ...config });
+  const safeConfig = { ...existing, ...config };
+  delete safeConfig.appAccessToken;
+  await setConfig(safeConfig);
   res.json({ ok: true });
 });
 
 app.post("/api/script", async (req, res) => {
   try {
-    const { prompt, apiKey, baseUrl, model } = req.body;
-    if (!prompt || !apiKey) return res.status(400).json({ error: "Missing prompt or apiKey" });
-    const script = await generateScript({ prompt, apiKey, baseUrl, model });
+    const { prompt, baseUrl, model } = req.body;
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!prompt || !apiKey) return res.status(400).json({ error: "Missing prompt or server OpenAI key." });
+    const script = await generateScript({
+      prompt,
+      apiKey,
+      baseUrl: process.env.OPENAI_BASE_URL || baseUrl,
+      model: process.env.OPENAI_MODEL || model,
+    });
     res.json({ script });
   } catch (error) {
-    console.error(error);
+    console.error(error.message || error);
     res.status(500).json({ error: error.message || "Failed to generate script" });
   }
 });
 
 app.post("/api/metadata", async (req, res) => {
   try {
-    const { script, apiKey, baseUrl, model, channelContext } = req.body;
+    const { script, baseUrl, model, channelContext } = req.body;
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!script || !apiKey) {
-      return res.status(400).json({ error: "Missing script or apiKey" });
+      return res.status(400).json({ error: "Missing script or server OpenAI key." });
     }
     const metadata = await generateMetadata({
       script,
       apiKey,
-      baseUrl,
-      model,
+      baseUrl: process.env.OPENAI_BASE_URL || baseUrl,
+      model: process.env.OPENAI_MODEL || model,
       channelContext,
     });
     res.json(metadata);
   } catch (error) {
-    console.error(error);
+    console.error(error.message || error);
     res.status(500).json({ error: error.message || "Failed to generate metadata" });
   }
 });
 
 app.post("/api/voice", async (req, res) => {
   try {
-    const { text, voice, elevenLabsApiKey } = req.body;
+    const { text, voice } = req.body;
+    const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
     if (!text) return res.status(400).json({ error: "Missing text" });
     const result = await generateVoice({ text, voice, elevenLabsApiKey, outDir: GENERATED_DIR });
     res.json(result);
   } catch (error) {
-    console.error(error);
+    console.error(error.message || error);
     res.status(500).json({ error: error.message || "Failed to generate voice" });
   }
 });
@@ -229,7 +250,7 @@ app.post("/api/video", async (req, res) => {
     await appendHistory(historyItem);
     res.json({ file: stored.key, url: `/api/files/generated/${stored.key}` });
   } catch (error) {
-    console.error(error);
+    console.error(error.message || error);
     res.status(500).json({ error: error.message || "Failed to generate video" });
   }
 });
@@ -258,19 +279,20 @@ app.get("/api/youtube/callback", async (req, res) => {
     await setYoutubeTokens(tokens);
     return res.redirect("/?youtube=connected");
   } catch (err) {
-    console.error(err);
+    console.error(err.message || err);
     return res.status(500).json({ error: err.message });
   }
 });
 
 app.get("/api/youtube/tokens", async (req, res) => {
   const tokens = await getYoutubeTokens();
-  res.json(tokens);
+  res.json({ connected: Boolean(tokens?.refresh_token || tokens?.access_token) });
 });
 
 app.post("/api/channel/analysis", async (req, res) => {
   try {
-    const { apiKey, baseUrl, model, channelId, channelContext, maxVideos } = req.body || {};
+    const { baseUrl, model, channelId, channelContext, maxVideos } = req.body || {};
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return res.status(400).json({ error: "Missing OpenAI API key." });
     }
@@ -288,28 +310,36 @@ app.post("/api/channel/analysis", async (req, res) => {
       channelId,
       maxVideos: Number(maxVideos) || 30,
       openaiKey: apiKey,
-      baseUrl,
-      model,
+      baseUrl: process.env.OPENAI_BASE_URL || baseUrl,
+      model: process.env.OPENAI_MODEL || model,
       channelContext,
     });
     res.json(result);
   } catch (err) {
-    console.error(err);
+    console.error(err.message || err);
     res.status(500).json({ error: err.message || "Channel analysis failed" });
   }
 });
 
 app.post("/api/youtube/upload", async (req, res) => {
   try {
-    const { accessToken, refreshToken, videoFile, title, description, tags } = req.body;
-    if (!accessToken || !videoFile) {
-      return res.status(400).json({ error: "Missing accessToken or videoFile" });
+    const { videoFile, title, description, tags } = req.body;
+    if (!videoFile) {
+      return res.status(400).json({ error: "Missing videoFile" });
+    }
+    const tokens = await getYoutubeTokens();
+    let accessToken = tokens.access_token;
+    if (!accessToken && tokens.refresh_token) {
+      accessToken = await refreshYoutubeAccessToken(tokens.refresh_token);
+    }
+    if (!accessToken) {
+      return res.status(400).json({ error: "Connect YouTube in Settings first." });
     }
     const safeVideo = path.basename(videoFile);
     const localVideoPath = await getLocalPath("generated", safeVideo);
     const result = await uploadToYoutube({
       accessToken,
-      refreshToken,
+      refreshToken: tokens.refresh_token,
       videoPath: localVideoPath,
       title,
       description,
@@ -321,7 +351,7 @@ app.post("/api/youtube/upload", async (req, res) => {
     await fs.rm(localVideoPath, { force: true });
     res.json(result);
   } catch (err) {
-    console.error(err);
+    console.error(err.message || err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -329,10 +359,6 @@ app.post("/api/youtube/upload", async (req, res) => {
 app.post("/api/automation/run", async (req, res) => {
   try {
     const {
-      openaiKey,
-      openaiBaseUrl,
-      openaiModel,
-      elevenLabsKey,
       voice,
       upload,
       maxDuration,
@@ -344,6 +370,8 @@ app.post("/api/automation/run", async (req, res) => {
     if (!baseVideos.length) {
       return res.status(400).json({ error: "Upload at least one base video first." });
     }
+    const openaiKey = process.env.OPENAI_API_KEY;
+    const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
     if (!openaiKey) {
       return res.status(400).json({ error: "Missing OpenAI API key." });
     }
@@ -363,8 +391,8 @@ app.post("/api/automation/run", async (req, res) => {
       const script = await generateScript({
         prompt,
         apiKey: openaiKey,
-        baseUrl: openaiBaseUrl || config.openaiBaseUrl,
-        model: openaiModel || config.openaiModel,
+        baseUrl: process.env.OPENAI_BASE_URL || config.openaiBaseUrl,
+        model: process.env.OPENAI_MODEL || config.openaiModel,
       });
 
       let videoTitle = config.defaultTitle;
@@ -375,8 +403,8 @@ app.post("/api/automation/run", async (req, res) => {
           const metadata = await generateMetadata({
             script,
             apiKey: openaiKey,
-            baseUrl: openaiBaseUrl || config.openaiBaseUrl,
-            model: openaiModel || config.openaiModel,
+            baseUrl: process.env.OPENAI_BASE_URL || config.openaiBaseUrl,
+            model: process.env.OPENAI_MODEL || config.openaiModel,
             channelContext: config.channelContext,
           });
           if (metadata.title) videoTitle = metadata.title;
@@ -453,7 +481,7 @@ app.post("/api/automation/run", async (req, res) => {
 
     res.json({ results });
   } catch (error) {
-    console.error(error);
+    console.error(error.message || error);
     res.status(500).json({ error: error.message || "Automation failed" });
   }
 });

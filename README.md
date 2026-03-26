@@ -210,6 +210,19 @@ Optional overrides:
 - `YOUTUBE_PRIVACY_STATUS` (`public`, `unlisted`, or `private`)
 - `VIDEO_RANDOM_START` (`true` to randomize the start offset, `false` to always start at 0)
 
+## Security hardening
+
+This project is configured to keep **all API keys server-side** and never expose them to the frontend:
+- Set keys only in **GitHub Secrets** or server environment variables.
+- The API requires `APP_ACCESS_TOKEN` (server env) for all `/api/*` routes.
+- GitHub Actions runs with **minimal permissions** (`contents: read`) and performs a **secret scan** before uploads.
+- `.env`, `*.key`, `*.pem`, `credentials.json` are ignored by git.
+
+Recommended:
+- Make the repository **private**
+- Enable **2FA** on GitHub
+- Use a strong random `APP_ACCESS_TOKEN`
+
 Optional analysis secrets (for manual run):
 - `CHANNEL_ID`
 - `ANALYSIS_VIDEO_COUNT`

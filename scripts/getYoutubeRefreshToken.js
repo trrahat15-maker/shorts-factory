@@ -26,6 +26,12 @@ console.log("\nOpen this URL in your browser to authorize:");
 console.log(authUrl);
 console.log("\nWaiting for OAuth callback on:", REDIRECT_URI);
 
+function maskToken(token = "") {
+  if (!token) return "";
+  if (token.length <= 8) return "***";
+  return `${token.slice(0, 4)}...${token.slice(-4)}`;
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     if (!req.url?.includes("code=")) {
@@ -46,8 +52,14 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end("Authorization complete. You can close this tab.");
 
-    console.log("\nRefresh token:");
-    console.log(tokens.refresh_token);
+    const allowPrint = process.env.PRINT_REFRESH_TOKEN === "true";
+    if (allowPrint) {
+      console.log("\nRefresh token:");
+      console.log(tokens.refresh_token);
+    } else {
+      console.log("\nRefresh token (masked):", maskToken(tokens.refresh_token));
+      console.log("Set PRINT_REFRESH_TOKEN=true to display the full token.");
+    }
     console.log("\nSave it as GitHub Secret: YOUTUBE_REFRESH_TOKEN");
     server.close();
   } catch (err) {

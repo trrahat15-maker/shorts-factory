@@ -24,7 +24,7 @@
     <main class="panel" id="home">
       <h2>Welcome</h2>
       <p>Upload a few base videos, generate scripts, then create and schedule Shorts daily.</p>
-      <div class="card" id="home-status">Add your API keys in Settings to get started.</div>
+      <div class="card" id="home-status">Connect YouTube and set your App Access Token in Settings.</div>
       <div class="card">
         <h3>Quick Start</h3>
         <p>1. Upload 1-3 vertical base videos in Library.</p>
@@ -150,23 +150,13 @@
     <main class="panel hidden" id="settings">
       <h2>Settings</h2>
       <div class="card">
-        <h3>API Vault</h3>
-        <label for="vault-password">Vault password</label>
-        <input id="vault-password" type="password" autocomplete="new-password" />
-        <button id="unlock-vault" type="button">Unlock Vault</button>
-        <div id="vault-status" class="status"></div>
-      </div>
-
-      <div class="card">
         <h3>AI Settings</h3>
-        <label for="openai-key">OpenAI API Key</label>
-        <input id="openai-key" type="password" autocomplete="new-password" />
         <label for="openai-base">OpenAI Base URL (optional)</label>
         <input id="openai-base" placeholder="https://api.openai.com/v1" />
         <label for="openai-model">OpenAI Model</label>
         <input id="openai-model" placeholder="gpt-4o-mini" />
-        <label for="app-token">App Access Token (optional)</label>
-        <input id="app-token" type="password" placeholder="Set a token to lock the API" />
+        <label for="app-token">App Access Token</label>
+        <input id="app-token" type="password" placeholder="Required to lock the API" />
         <label class="checkbox">
           <input id="auto-metadata" type="checkbox" />
           Auto-generate title, description, and tags
@@ -176,8 +166,6 @@
       </div>
       <div class="card">
         <h3>Voice Settings</h3>
-        <label for="elevenlabs-key">ElevenLabs API Key</label>
-        <input id="elevenlabs-key" type="password" autocomplete="new-password" />
         <label for="default-voice">Default Voice</label>
         <input id="default-voice" placeholder="alloy" />
       </div>

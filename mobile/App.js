@@ -1,6 +1,5 @@
 import { StatusBar } from "expo-status-bar";
 import { Video } from "expo-av";
-import * as SecureStore from "expo-secure-store";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
@@ -25,8 +24,6 @@ import {
 const STORAGE_CONFIG = "sfd_mobile_config";
 const STORAGE_AUTOMATION = "sfd_mobile_automation";
 const STORAGE_LAST_RUN = "sfd_mobile_last_run";
-const KEY_OPENAI = "sfd_openai_key";
-const KEY_ELEVEN = "sfd_elevenlabs_key";
 
 const DEFAULT_CONFIG = {
   backendUrl: "",
@@ -87,8 +84,6 @@ function useApiBase(config) {
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
   const [config, setConfig] = useState(DEFAULT_CONFIG);
-  const [openaiKey, setOpenaiKey] = useState("");
-  const [elevenLabsKey, setElevenLabsKey] = useState("");
   const [baseVideos, setBaseVideos] = useState([]);
   const [selectedBaseVideo, setSelectedBaseVideo] = useState("");
   const [musicTracks, setMusicTracks] = useState([]);
@@ -116,8 +111,6 @@ export default function App() {
   const apiBase = useApiBase(config);
   const hasBackend = Boolean(config.backendUrl);
   const hasAppToken = Boolean(config.appAccessToken);
-  const hasOpenai = Boolean(openaiKey);
-  const hasEleven = Boolean(elevenLabsKey);
   const youtubeConnected = youtubeStatus === "Connected";
 
   useEffect(() => {
@@ -126,11 +119,6 @@ export default function App() {
       if (stored) {
         setConfig(normalizeConfig(JSON.parse(stored)));
       }
-      const savedOpenai = await SecureStore.getItemAsync(KEY_OPENAI);
-      const savedEleven = await SecureStore.getItemAsync(KEY_ELEVEN);
-      if (savedOpenai) setOpenaiKey(savedOpenai);
-      if (savedEleven) setElevenLabsKey(savedEleven);
-
       const automationRaw = await AsyncStorage.getItem(STORAGE_AUTOMATION);
       if (automationRaw) {
         const data = JSON.parse(automationRaw);
@@ -154,7 +142,7 @@ export default function App() {
     if (!automationEnabled) return;
     const timer = setInterval(() => runAutomationIfScheduled(), 30000);
     return () => clearInterval(timer);
-  }, [automationEnabled, config, openaiKey, elevenLabsKey, automationUpload]);
+  }, [automationEnabled, config, automationUpload]);
 
   const refreshAll = async () => {
     await Promise.all([refreshBaseVideos(), refreshMusic(), refreshHistory(), checkYoutube()]);
@@ -204,9 +192,7 @@ export default function App() {
   };
 
   const saveSecrets = async () => {
-    if (openaiKey) await SecureStore.setItemAsync(KEY_OPENAI, openaiKey);
-    if (elevenLabsKey) await SecureStore.setItemAsync(KEY_ELEVEN, elevenLabsKey);
-    setStatus("API keys saved securely.");
+    setStatus("API keys are managed server-side via GitHub Secrets.");
   };
 
   const refreshBaseVideos = async () => {
@@ -299,10 +285,6 @@ export default function App() {
   };
 
   const handleGenerateScript = async () => {
-    if (!openaiKey) {
-      setStatus("Add your OpenAI key in Settings.");
-      return;
-    }
     setLoading(true);
     setStatus("Generating script...");
     try {
@@ -311,7 +293,6 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: promptOverride?.trim() || config.defaultPrompt,
-          apiKey: openaiKey,
           baseUrl: config.openaiBaseUrl,
           model: config.openaiModel,
         }),
@@ -331,10 +312,6 @@ export default function App() {
       setMetadataStatus("Generate a script first.");
       return;
     }
-    if (!openaiKey) {
-      setMetadataStatus("Add your OpenAI key in Settings.");
-      return;
-    }
     setLoading(true);
     setMetadataStatus("Generating metadata...");
     try {
@@ -343,7 +320,6 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           script,
-          apiKey: openaiKey,
           baseUrl: config.openaiBaseUrl,
           model: config.openaiModel,
           channelContext: config.channelContext,
@@ -365,10 +341,6 @@ export default function App() {
       setStatus("Generate a script first.");
       return;
     }
-    if (!elevenLabsKey) {
-      setStatus("Add your ElevenLabs key in Settings.");
-      return;
-    }
     setLoading(true);
     setStatus("Generating voice...");
     try {
@@ -378,7 +350,6 @@ export default function App() {
         body: JSON.stringify({
           text: script,
           voice: config.defaultVoice,
-          elevenLabsApiKey: elevenLabsKey,
         }),
       });
       setVoiceFile(data.file || "");
@@ -461,17 +432,13 @@ export default function App() {
   const checkYoutube = async () => {
     try {
       const tokens = await apiFetch("/api/youtube/tokens");
-      setYoutubeStatus(tokens.access_token ? "Connected" : "Not connected");
+      setYoutubeStatus(tokens.connected ? "Connected" : "Not connected");
     } catch (err) {
       setYoutubeStatus("Not connected");
     }
   };
 
   const handleAnalyzeChannel = async () => {
-    if (!openaiKey) {
-      setAnalysisStatus("Add your OpenAI key in Settings.");
-      return;
-    }
     setLoading(true);
     setAnalysisStatus("Analyzing channel...");
     try {
@@ -479,7 +446,6 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          apiKey: openaiKey,
           baseUrl: config.openaiBaseUrl,
           model: config.openaiModel,
           channelId: analysisChannelId.trim(),
@@ -505,7 +471,7 @@ export default function App() {
     setStatus("Uploading to YouTube...");
     try {
       const tokens = await apiFetch("/api/youtube/tokens");
-      if (!tokens.access_token) {
+      if (!tokens.connected) {
         setStatus("Connect YouTube in Settings.");
         return;
       }
@@ -517,8 +483,6 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
           videoFile,
           title: titleOverride?.trim() || config.defaultTitle,
           description: descriptionOverride?.trim() || config.defaultDescription,
@@ -535,10 +499,6 @@ export default function App() {
   };
 
   const runAutomation = async () => {
-    if (!openaiKey || !elevenLabsKey) {
-      setStatus("Add OpenAI + ElevenLabs keys in Settings.");
-      return;
-    }
     setLoading(true);
     setStatus("Running automation...");
     try {
@@ -546,10 +506,8 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          openaiKey,
           openaiBaseUrl: config.openaiBaseUrl,
           openaiModel: config.openaiModel,
-          elevenLabsKey,
           voice: config.defaultVoice,
           upload: automationUpload,
           maxDuration: config.maxDuration,
@@ -652,23 +610,8 @@ export default function App() {
               value={config.appAccessToken}
               onChangeText={(value) => setConfig({ ...config, appAccessToken: value })}
             />
-            <Text style={styles.label}>OpenAI API Key</Text>
-            <TextInput
-              style={styles.input}
-              secureTextEntry
-              value={openaiKey}
-              onChangeText={setOpenaiKey}
-            />
-            <Text style={styles.label}>ElevenLabs API Key</Text>
-            <TextInput
-              style={styles.input}
-              secureTextEntry
-              value={elevenLabsKey}
-              onChangeText={setElevenLabsKey}
-            />
             <Pressable style={styles.button} onPress={async () => {
               await saveConfig();
-              await saveSecrets();
               await refreshAll();
             }}>
               <Text style={styles.buttonText}>Save & Continue</Text>
@@ -679,7 +622,7 @@ export default function App() {
         {activeTab === "home" && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Quick Start</Text>
-            <Text style={styles.text}>1. Set backend URL + API keys in Settings.</Text>
+            <Text style={styles.text}>1. Set backend URL + App Access Token in Settings.</Text>
             <Text style={styles.text}>2. Upload 1-3 base videos in Library.</Text>
             <Text style={styles.text}>3. Create your short and upload to YouTube.</Text>
             <Pressable style={styles.button} onPress={refreshAll}>
@@ -691,8 +634,6 @@ export default function App() {
             <Text style={styles.cardTitle}>Setup Checklist</Text>
             <Text style={styles.text}>{hasBackend ? "✅" : "⚠️"} Backend URL set</Text>
             <Text style={styles.text}>{hasAppToken ? "✅" : "⚠️"} App Access Token set</Text>
-            <Text style={styles.text}>{hasOpenai ? "✅" : "⚠️"} OpenAI key saved</Text>
-            <Text style={styles.text}>{hasEleven ? "✅" : "⚠️"} ElevenLabs key saved</Text>
             <Text style={styles.text}>{youtubeConnected ? "✅" : "⚠️"} YouTube connected</Text>
             <Text style={styles.text}>YouTube: {youtubeStatus}</Text>
           </View>
@@ -906,20 +847,6 @@ export default function App() {
             <Text style={styles.note}>
               This must be a public HTTPS URL so your phone can reach it.
             </Text>
-            <Text style={styles.label}>OpenAI API Key</Text>
-            <TextInput
-              style={styles.input}
-              secureTextEntry
-              value={openaiKey}
-              onChangeText={setOpenaiKey}
-            />
-            <Text style={styles.label}>ElevenLabs API Key</Text>
-            <TextInput
-              style={styles.input}
-              secureTextEntry
-              value={elevenLabsKey}
-              onChangeText={setElevenLabsKey}
-            />
             <Text style={styles.label}>OpenAI Model</Text>
             <TextInput
               style={styles.input}
@@ -932,7 +859,7 @@ export default function App() {
               value={config.openaiBaseUrl}
               onChangeText={(value) => setConfig({ ...config, openaiBaseUrl: value })}
             />
-            <Text style={styles.label}>App Access Token (optional)</Text>
+            <Text style={styles.label}>App Access Token</Text>
             <TextInput
               style={styles.input}
               secureTextEntry
@@ -1062,7 +989,7 @@ export default function App() {
               <Text style={styles.buttonText}>Save Settings</Text>
             </Pressable>
             <Pressable style={styles.secondaryButton} onPress={saveSecrets}>
-              <Text style={styles.secondaryText}>Save API Keys</Text>
+              <Text style={styles.secondaryText}>API Keys Are Server-Side</Text>
             </Pressable>
             <Pressable style={styles.secondaryButton} onPress={handleConnectYoutube}>
               <Text style={styles.secondaryText}>Connect YouTube</Text>

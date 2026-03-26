@@ -1,12 +1,9 @@
 const STORAGE_CONFIG = "sfd_config";
-const STORAGE_VAULT = "sfd_vault";
 const STORAGE_AUTOMATION = "sfd_automation_enabled";
 const STORAGE_LAST_RUN = "sfd_last_run";
 
 const state = {
   config: {},
-  secrets: { openaiKey: "", elevenLabsKey: "" },
-  vaultUnlocked: false,
   selectedBaseVideo: null,
   lastVoiceFile: null,
   lastVideoFile: null,
@@ -237,64 +234,14 @@ async function saveConfig() {
     console.error(err);
   }
 
-  await saveVaultIfNeeded();
   setStatus("#save-status", "Settings saved.");
   startScheduler();
 }
 
-async function saveVaultIfNeeded() {
-  const openaiKey = $("#openai-key").value.trim();
-  const elevenLabsKey = $("#elevenlabs-key").value.trim();
-  const hasSecrets = openaiKey || elevenLabsKey;
-
-  if (!hasSecrets) {
-    return;
-  }
-
-  const password = $("#vault-password").value.trim();
-  if (!password) {
-    setStatus("#vault-status", "Add a vault password to encrypt your keys.");
-    return;
-  }
-
-  const encrypted = await encryptConfig({ openaiKey, elevenLabsKey }, password);
-  localStorage.setItem(STORAGE_VAULT, encrypted);
-  state.secrets = { openaiKey, elevenLabsKey };
-  state.vaultUnlocked = true;
-  setStatus("#vault-status", "Vault saved and unlocked.");
-}
-
-async function unlockVault() {
-  const encrypted = localStorage.getItem(STORAGE_VAULT);
-  if (!encrypted) {
-    setStatus("#vault-status", "No vault found. Save settings to create one.");
-    return;
-  }
-  const password = $("#vault-password").value.trim();
-  if (!password) {
-    setStatus("#vault-status", "Enter your vault password.");
-    return;
-  }
-
-  try {
-    const secrets = await decryptConfig(encrypted, password);
-    state.secrets = secrets;
-    state.vaultUnlocked = true;
-    $("#openai-key").value = secrets.openaiKey || "";
-    $("#elevenlabs-key").value = secrets.elevenLabsKey || "";
-    setStatus("#vault-status", "Vault unlocked.");
-  } catch (err) {
-    console.error(err);
-    setStatus("#vault-status", "Vault unlock failed. Check password.");
-  }
-}
-
 function updateVaultStatus() {
-  const encrypted = localStorage.getItem(STORAGE_VAULT);
-  if (encrypted) {
-    setStatus("#vault-status", state.vaultUnlocked ? "Vault unlocked." : "Vault locked.");
-  } else {
-    setStatus("#vault-status", "No vault saved yet.");
+  const status = document.querySelector("#vault-status");
+  if (status) {
+    status.textContent = "API keys are managed server-side via GitHub Secrets.";
   }
 }
 
@@ -428,11 +375,6 @@ async function handleUploadMusic(event) {
 
 async function handleGenerateScript() {
   const prompt = $("#script-prompt").value || state.config.defaultPrompt;
-  const key = state.secrets.openaiKey;
-  if (!key) {
-    setStatus("#home-status", "Unlock the vault and add your OpenAI key in Settings.");
-    return;
-  }
   setStatus("#home-status", "Generating script...");
   try {
     const { script } = await api("/api/script", {
@@ -440,7 +382,6 @@ async function handleGenerateScript() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         prompt,
-        apiKey: key,
         baseUrl: state.config.openaiBaseUrl,
         model: state.config.openaiModel,
       }),
@@ -456,13 +397,8 @@ async function handleGenerateScript() {
 
 async function handleGenerateMetadata() {
   const script = $("#script-output").value.trim();
-  const key = state.secrets.openaiKey;
   if (!script) {
     setStatus("#metadata-status", "Generate a script first.");
-    return;
-  }
-  if (!key) {
-    setStatus("#metadata-status", "Unlock the vault and add your OpenAI key in Settings.");
     return;
   }
   setStatus("#metadata-status", "Generating metadata...");
@@ -472,7 +408,6 @@ async function handleGenerateMetadata() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         script,
-        apiKey: key,
         baseUrl: state.config.openaiBaseUrl,
         model: state.config.openaiModel,
         channelContext: state.config.channelContext,
@@ -494,25 +429,20 @@ async function handleGenerateVoice() {
     setStatus("#voice-status", "Generate a script first.");
     return;
   }
-  const elevenKey = state.secrets.elevenLabsKey;
   const voice = $("#voice-voice").value.trim() || state.config.defaultVoice || "alloy";
   setStatus("#voice-status", "Generating voice...");
 
-  if (elevenKey) {
-    try {
-      const result = await api("/api/voice", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voice, elevenLabsApiKey: elevenKey }),
-      });
-      state.lastVoiceFile = result.file;
-      setStatus("#voice-status", "Voice generated.");
-    } catch (err) {
-      console.error(err);
-      setStatus("#voice-status", "ElevenLabs failed. Try again.");
-    }
-  } else {
-    await generateBrowserVoice(text);
+  try {
+    const result = await api("/api/voice", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, voice }),
+    });
+    state.lastVoiceFile = result.file;
+    setStatus("#voice-status", "Voice generated.");
+  } catch (err) {
+    console.error(err);
+    setStatus("#voice-status", "Voice generation failed. Check server keys.");
   }
 }
 
@@ -584,21 +514,14 @@ async function handleGenerateVideo() {
 }
 
 async function handleAutomation(isScheduled = false) {
-  if (!state.secrets.openaiKey || !state.secrets.elevenLabsKey) {
-    setStatus("#automation-status", "Unlock vault and add OpenAI + ElevenLabs keys.");
-    return;
-  }
-
   setStatus("#automation-status", "Running automation...");
   try {
     const result = await api("/api/automation/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        openaiKey: state.secrets.openaiKey,
         openaiBaseUrl: state.config.openaiBaseUrl,
         openaiModel: state.config.openaiModel,
-        elevenLabsKey: state.secrets.elevenLabsKey,
         voice: state.config.defaultVoice,
         upload: state.automationUpload,
         maxDuration: state.config.maxDuration,
@@ -624,7 +547,7 @@ async function handleUploadYoutube() {
   setStatus("#video-status", "Uploading to YouTube...");
   try {
     const tokens = await api("/api/youtube/tokens");
-    if (!tokens.access_token) {
+    if (!tokens.connected) {
       setStatus("#video-status", "Connect YouTube in Settings first.");
       return;
     }
@@ -639,8 +562,6 @@ async function handleUploadYoutube() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
         videoFile: state.lastVideoFile,
         title,
         description,
@@ -667,7 +588,7 @@ async function handleConnectYoutube() {
 async function checkYoutubeStatus() {
   try {
     const tokens = await api("/api/youtube/tokens");
-    if (tokens.access_token) {
+    if (tokens.connected) {
       setStatus("#youtube-status", "YouTube connected.");
     } else {
       setStatus("#youtube-status", "Not connected.");
@@ -678,11 +599,6 @@ async function checkYoutubeStatus() {
 }
 
 async function handleAnalyzeChannel() {
-  const key = state.secrets.openaiKey;
-  if (!key) {
-    setStatus("#analysis-status", "Unlock the vault and add your OpenAI key in Settings.");
-    return;
-  }
   setStatus("#analysis-status", "Analyzing channel...");
   try {
     const channelId = $("#analysis-channel-id")?.value.trim();
@@ -692,7 +608,6 @@ async function handleAnalyzeChannel() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        apiKey: key,
         baseUrl: state.config.openaiBaseUrl,
         model: state.config.openaiModel,
         channelId,
@@ -774,7 +689,12 @@ function attachListeners() {
   $("#save-settings").addEventListener("click", saveConfig);
   $("#run-automation").addEventListener("click", () => handleAutomation(false));
   $("#connect-youtube").addEventListener("click", handleConnectYoutube);
-  $("#unlock-vault").addEventListener("click", unlockVault);
+  const unlockBtn = $("#unlock-vault");
+  if (unlockBtn) {
+    unlockBtn.addEventListener("click", () => {
+      setStatus("#vault-status", "API keys are managed server-side via GitHub Secrets.");
+    });
+  }
   $("#music-upload").addEventListener("change", handleUploadMusic);
   $("#run-analysis").addEventListener("click", handleAnalyzeChannel);
 
