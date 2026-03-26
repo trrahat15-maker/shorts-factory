@@ -127,6 +127,28 @@ function ensureMinScriptLength(script, minSeconds) {
   return `${script.trim()} ${extra.join(" ")}`.replace(/\s+/g, " ").trim();
 }
 
+function enforceLoopEnding(script) {
+  if (!script) return script;
+  const sentences = script
+    .split(/(?<=[.?!])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (sentences.length < 2) return script;
+  const first = sentences[0].replace(/[.!?]+$/g, "").trim();
+  const firstWords = first.split(/\s+/).slice(0, 6).join(" ");
+  const lastIdx = sentences.length - 1;
+  const last = sentences[lastIdx].replace(/[.!?]+$/g, "").trim();
+  const lowerLast = last.toLowerCase();
+  if (firstWords && lowerLast.includes(firstWords.toLowerCase())) {
+    return sentences.join(" ");
+  }
+  const loopLine = firstWords
+    ? `And that's exactly how ${firstWords.toLowerCase()}.`
+    : "And that's exactly why it keeps happening.";
+  sentences[lastIdx] = `${last}. ${loopLine}`;
+  return sentences.join(" ");
+}
+
 function polishTitle(input) {
   if (!input) return input;
   let title = String(input).trim();
@@ -316,23 +338,33 @@ async function run() {
   const hasScriptDuration = scriptDurationEnvRaw !== "";
 
   if (viralMode) {
-    if (!minDuration) minDuration = 15;
-    if (!maxDuration) maxDuration = 25;
+    if (!minDuration) minDuration = 20;
+    if (!maxDuration) maxDuration = 40;
   }
   if (minDuration && maxDuration && minDuration > maxDuration) {
     maxDuration = minDuration;
   }
   let targetSecondsRaw = hasScriptDuration ? Number(scriptDurationEnvRaw) : 0;
   if (!targetSecondsRaw) {
-    targetSecondsRaw = maxDuration || (viralMode ? 20 : 30);
+    targetSecondsRaw = maxDuration || (viralMode ? 30 : 30);
   }
   const targetSeconds = Math.max(minDuration || 0, targetSecondsRaw || 30);
   const prompt = getEnv(
     "PROMPT",
-    `Write a ${targetSeconds} second motivational speech for YouTube Shorts. Hook the viewer in the first sentence. Use simple powerful language.`
+    [
+      `Write a ${targetSeconds} second viral YouTube Shorts script.`,
+      "Structure:",
+      "0-2 sec: scroll-stopping hook.",
+      "2-10 sec: curiosity + tension.",
+      "10-30 sec: fast value or story.",
+      "Last 3 sec: loop ending that connects back to the first line.",
+      "Use triggers: curiosity, fear, success, money, secrets.",
+      "Hook examples: \"You're doing this wrong...\", \"This is why you're not successful...\", \"Nobody tells you this...\"",
+      "Keep sentences short and punchy.",
+    ].join(" ")
   );
   const language = getEnv("SCRIPT_LANGUAGE", "English").trim();
-  const topics = parseCsv(getEnv("TOPIC_LIST", ""));
+  const topics = parseCsv(getEnv("TOPIC_LIST", "success,mindset,money,productivity"));
   const dailyTopic = pickDailyTopic(topics);
   const topicLine = dailyTopic ? `Topic: ${dailyTopic}` : "";
 
@@ -457,9 +489,10 @@ async function run() {
       const cta = pickRandom(ctaList, "Save this and share it.");
         script = `${script.trim()} ${cta}`.replace(/\s+/g, " ").trim();
       }
-      const maxScriptSeconds = maxDurationFinal || (viralMode ? 25 : 0);
+      const maxScriptSeconds = maxDurationFinal || (viralMode ? 40 : 0);
       script = trimScriptToDuration(script, maxScriptSeconds);
       script = ensureMinScriptLength(script, minDurationFinal);
+      script = enforceLoopEnding(script);
 
     if (useAiMetadata) {
       try {

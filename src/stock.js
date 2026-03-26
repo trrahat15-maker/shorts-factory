@@ -103,6 +103,14 @@ const KEYWORD_SYNONYMS = {
   power: ["strength", "energy", "force"],
 };
 
+const EMOTION_QUERIES = {
+  success: ["winning", "rich lifestyle", "business success"],
+  failure: ["sad", "lonely", "struggle"],
+  focus: ["focused work", "study", "productivity"],
+  money: ["money cash", "luxury", "wealth"],
+  fear: ["anxiety", "dark", "pressure"],
+};
+
 function normalizeWord(word) {
   return word.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -146,13 +154,27 @@ function expandKeywords(keywords) {
   return Array.from(expanded).filter(Boolean);
 }
 
+function detectEmotion(text) {
+  const lower = (text || "").toLowerCase();
+  if (/(fail|failure|lost|regret|sad|lonely|broke|struggle)/.test(lower)) return "failure";
+  if (/(money|wealth|rich|cash|income|salary)/.test(lower)) return "money";
+  if (/(focus|study|discipline|consistent|productivity|work)/.test(lower)) return "focus";
+  if (/(fear|anxiety|doubt|worry)/.test(lower)) return "fear";
+  if (/(success|win|achieve|goal|dream)/.test(lower)) return "success";
+  return "";
+}
+
 function buildQueryVariants(text) {
   const keywords = extractKeywords(text, 5);
-  if (!keywords.length) return ["motivation success"];
+  const emotion = detectEmotion(text);
+  if (!keywords.length && !emotion) return ["motivation success"];
   const expanded = expandKeywords(keywords);
   const primary = keywords.slice(0, 3).join(" ");
   const secondary = expanded.slice(0, 4).join(" ");
   const variants = new Set([primary, secondary]);
+  if (emotion && EMOTION_QUERIES[emotion]) {
+    EMOTION_QUERIES[emotion].forEach((query) => variants.add(query));
+  }
   keywords.forEach((word) => variants.add(word));
   return Array.from(variants).filter(Boolean);
 }
@@ -165,19 +187,25 @@ export function splitScriptIntoParts(script) {
     .filter(Boolean);
 
   const wordCount = script.split(/\s+/).filter(Boolean).length;
-  let parts = 2;
-  if (wordCount > 90) parts = 5;
-  else if (wordCount > 70) parts = 4;
-  else if (wordCount > 45) parts = 3;
+  let parts = 5;
+  if (wordCount > 160) parts = 8;
+  else if (wordCount > 140) parts = 7;
+  else if (wordCount > 120) parts = 6;
 
-  if (sentences.length <= parts) {
-    return sentences.map((text) => ({ text }));
+  if (sentences.length >= parts) {
+    const chunkSize = Math.ceil(sentences.length / parts);
+    const output = [];
+    for (let i = 0; i < sentences.length; i += chunkSize) {
+      output.push({ text: sentences.slice(i, i + chunkSize).join(" ") });
+    }
+    return output.slice(0, parts);
   }
 
-  const chunkSize = Math.ceil(sentences.length / parts);
+  const words = script.split(/\s+/).filter(Boolean);
+  const chunkSize = Math.ceil(words.length / parts);
   const output = [];
-  for (let i = 0; i < sentences.length; i += chunkSize) {
-    output.push({ text: sentences.slice(i, i + chunkSize).join(" ") });
+  for (let i = 0; i < words.length; i += chunkSize) {
+    output.push({ text: words.slice(i, i + chunkSize).join(" ") });
   }
   return output.slice(0, parts);
 }

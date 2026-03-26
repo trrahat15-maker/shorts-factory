@@ -65,8 +65,11 @@ function buildZoomPanExpr({ duration, zoom = 1.12 }) {
   const frames = Math.max(1, Math.round(duration * 30));
   const offsetX = randomBetween(-0.15, 0.15);
   const offsetY = randomBetween(-0.12, 0.12);
+  const shake = process.env.CAMERA_SHAKE?.toLowerCase() !== "false";
+  const shakeX = shake ? "+0.015*iw*sin(2*PI*0.6*on/30)" : "";
+  const shakeY = shake ? "+0.012*ih*cos(2*PI*0.55*on/30)" : "";
   return `zoompan=z='min(zoom+0.0015,${zoom})':d=${frames}:s=1080x1920:` +
-    `x='iw/2-(iw/zoom/2)+${offsetX}*iw':y='ih/2-(ih/zoom/2)+${offsetY}*ih'`;
+    `x='iw/2-(iw/zoom/2)+${offsetX}*iw${shakeX}':y='ih/2-(ih/zoom/2)+${offsetY}*ih${shakeY}'`;
 }
 
 function buildExtraEffects({ enabled, includeEq, grade }) {
