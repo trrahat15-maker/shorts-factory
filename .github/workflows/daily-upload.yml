@@ -49,6 +49,15 @@ jobs:
           OPENAI_MODEL_LIST: ${{ secrets.OPENAI_MODEL_LIST }}
           OPENAI_MODEL_ATTEMPTS: ${{ secrets.OPENAI_MODEL_ATTEMPTS }}
           OPENAI_RETRY_DELAYS: ${{ secrets.OPENAI_RETRY_DELAYS }}
+          ENABLE_TRENDS: ${{ secrets.ENABLE_TRENDS }}
+          TRENDS_REGION: ${{ secrets.TRENDS_REGION }}
+          TRENDS_LANGUAGE: ${{ secrets.TRENDS_LANGUAGE }}
+          TREND_MAX_TOPICS: ${{ secrets.TREND_MAX_TOPICS }}
+          HOOK_VARIANTS: ${{ secrets.HOOK_VARIANTS }}
+          AB_TEST: ${{ secrets.AB_TEST }}
+          POST_COMMENT: ${{ secrets.POST_COMMENT }}
+          PINNED_COMMENT: ${{ secrets.PINNED_COMMENT }}
+          SAVE_ARTIFACTS: ${{ secrets.SAVE_ARTIFACTS }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           ENABLE_STOCK_VIDEO: ${{ secrets.ENABLE_STOCK_VIDEO }}
@@ -65,6 +74,16 @@ jobs:
           SCRIPT_DURATION_SECONDS: ${{ secrets.SCRIPT_DURATION_SECONDS }}
           BASE_VIDEO_URLS: ${{ secrets.BASE_VIDEO_URLS }}
           MUSIC_URLS: ${{ secrets.MUSIC_URLS }}
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shorts-artifacts
+          if-no-files-found: warn
+          path: |
+            artifacts/*.mp4
+            data/learning.json
 
   analyze:
     runs-on: ubuntu-latest

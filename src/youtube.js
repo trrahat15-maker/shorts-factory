@@ -4,6 +4,7 @@ import fs from "fs";
 const SCOPES = [
   "https://www.googleapis.com/auth/youtube.upload",
   "https://www.googleapis.com/auth/youtube.readonly",
+  "https://www.googleapis.com/auth/youtube.force-ssl",
 ];
 
 function createOAuthClient() {
@@ -73,5 +74,26 @@ export async function uploadToYoutube({ accessToken, refreshToken, videoPath, ti
     },
   });
 
+  return res.data;
+}
+
+export async function postTopLevelComment({ accessToken, refreshToken, videoId, text }) {
+  if (!videoId || !text) return null;
+  const oauth2Client = createOAuthClient();
+  oauth2Client.setCredentials({ access_token: accessToken, refresh_token: refreshToken });
+  const youtube = google.youtube({ version: "v3", auth: oauth2Client });
+  const res = await youtube.commentThreads.insert({
+    part: ["snippet"],
+    requestBody: {
+      snippet: {
+        videoId,
+        topLevelComment: {
+          snippet: {
+            textOriginal: text,
+          },
+        },
+      },
+    },
+  });
   return res.data;
 }

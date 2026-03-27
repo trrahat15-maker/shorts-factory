@@ -3,6 +3,7 @@ mobile/node_modules/
 mobile/_git/
 data/
 uploads/
+artifacts/
 .env
 .env.*
 .env.local

@@ -3,11 +3,12 @@ import path from "path";
 import os from "os";
 import { google } from "googleapis";
 
-import { generateMetadata, generateScript } from "../src/openai.js";
+import { generateHooks, generateMetadata, generateScript } from "../src/openai.js";
 import { generateVoice } from "../src/voice.js";
 import { generateStockBaseVideo, generateVideo, getMediaDuration } from "../src/video.js";
-import { uploadToYoutube } from "../src/youtube.js";
+import { postTopLevelComment, uploadToYoutube } from "../src/youtube.js";
 import { extractKeywords, fetchStockScenes, splitScriptIntoParts, loadCachedMedia } from "../src/stock.js";
+import { buildRankedTopics, fetchGoogleTrends, fetchYoutubeTrends } from "../src/trends.js";
 
 const log = (message) => console.log(`[auto] ${message}`);
 
@@ -73,6 +74,36 @@ function pickRandom(list, fallback = "") {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+function scoreHook(text) {
+  const lower = String(text || "").toLowerCase();
+  let score = 0;
+  if (/\d/.test(lower)) score += 2;
+  if (/[!?]/.test(lower)) score += 1;
+  if (/(secret|wrong|nobody|stop|start|why|how)/.test(lower)) score += 2;
+  if (/(money|success|fail|fear|discipline|focus)/.test(lower)) score += 2;
+  const words = lower.split(/\s+/).filter(Boolean).length;
+  if (words >= 4 && words <= 10) score += 2;
+  return score;
+}
+
+function pickTopHooks(hooks, count = 2) {
+  const scored = hooks
+    .map((hook) => ({ hook, score: scoreHook(hook) }))
+    .sort((a, b) => b.score - a.score);
+  return scored.map((item) => item.hook).slice(0, count);
+}
+
+function replaceFirstSentence(script, hook) {
+  if (!hook) return script;
+  const sentences = script
+    .split(/(?<=[.?!])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!sentences.length) return hook;
+  sentences[0] = hook.endsWith(".") || hook.endsWith("!") || hook.endsWith("?") ? hook : `${hook}.`;
+  return sentences.join(" ");
+}
+
 function needsCta(text) {
   return !/(subscribe|follow|share|save|comment|like)/i.test(text || "");
 }
@@ -125,6 +156,32 @@ function ensureMinScriptLength(script, minSeconds) {
     idx += 1;
   }
   return `${script.trim()} ${extra.join(" ")}`.replace(/\s+/g, " ").trim();
+}
+
+async function loadLearningData(filePath) {
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return { topics: {}, hooks: {} };
+  }
+}
+
+async function saveLearningData(filePath, data) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+}
+
+function updateLearning(data, { topic, hook, stats }) {
+  if (!data.topics) data.topics = {};
+  if (!data.hooks) data.hooks = {};
+  const score = (stats?.views || 0) + (stats?.likes || 0) * 2 + (stats?.comments || 0) * 3;
+  if (topic) {
+    data.topics[topic] = (data.topics[topic] || 0) + score;
+  }
+  if (hook) {
+    data.hooks[hook] = (data.hooks[hook] || 0) + score;
+  }
 }
 
 function enforceLoopEnding(script) {
@@ -292,6 +349,27 @@ async function getAccessToken() {
   return accessToken;
 }
 
+async function fetchVideoStats(accessToken, videoId) {
+  if (!accessToken || !videoId) return null;
+  try {
+    const youtube = google.youtube("v3");
+    const res = await youtube.videos.list({
+      part: ["statistics"],
+      id: [videoId],
+      access_token: accessToken,
+    });
+    const stats = res?.data?.items?.[0]?.statistics || {};
+    return {
+      views: Number(stats.viewCount || 0),
+      likes: Number(stats.likeCount || 0),
+      comments: Number(stats.commentCount || 0),
+    };
+  } catch (err) {
+    log(`Stats fetch failed: ${err.message}`);
+    return null;
+  }
+}
+
 async function cleanupTemp(tempDir) {
   try {
     await fs.rm(tempDir, { recursive: true, force: true });
@@ -365,7 +443,28 @@ async function run() {
   );
   const language = getEnv("SCRIPT_LANGUAGE", "English").trim();
   const topics = parseCsv(getEnv("TOPIC_LIST", "success,mindset,money,productivity"));
-  const dailyTopic = pickDailyTopic(topics);
+  const enableTrends = getEnv("ENABLE_TRENDS", "true").toLowerCase() !== "false";
+  const trendRegion = getEnv("TRENDS_REGION", "US");
+  const trendLanguage = getEnv("TRENDS_LANGUAGE", "en-US");
+  const trendMax = Number(getEnv("TREND_MAX_TOPICS", "15")) || 15;
+  const learningPath = path.join(process.cwd(), "data", "learning.json");
+  const learning = await loadLearningData(learningPath);
+  let trendTopics = [];
+  if (enableTrends) {
+    try {
+      const accessToken = await getAccessToken();
+      const youtubeTrends = await fetchYoutubeTrends({ region: trendRegion, accessToken, maxTopics: trendMax });
+      const googleTrends = await fetchGoogleTrends({ region: trendRegion, hl: trendLanguage, maxTopics: trendMax });
+      trendTopics = buildRankedTopics({ trends: [...youtubeTrends, ...googleTrends], preferred: topics });
+    } catch (err) {
+      log(`Trend fetch failed: ${err.message}`);
+    }
+  }
+  const learnedTopics = Object.entries(learning?.topics || {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([topic]) => topic);
+  const mergedTopics = Array.from(new Set([...(trendTopics || []), ...learnedTopics, ...topics]));
+  const dailyTopic = pickDailyTopic(mergedTopics.length ? mergedTopics : topics);
   const topicLine = dailyTopic ? `Topic: ${dailyTopic}` : "";
 
   let openaiModel = getEnv("OPENAI_MODEL", "").trim();
@@ -424,6 +523,27 @@ async function run() {
   let videoPath = "";
 
   try {
+    const hookVariants = Number(getEnv("HOOK_VARIANTS", "5")) || 5;
+    const abTest = getEnv("AB_TEST", "false").toLowerCase() === "true";
+    const variantCount = abTest ? 2 : 1;
+    let hooks = [];
+    if (hookVariants > 0) {
+      try {
+        log("Generating hooks");
+        hooks = await generateHooks({
+          topic: dailyTopic,
+          apiKey: getEnv("OPENAI_API_KEY").trim(),
+          baseUrl: openaiBaseUrl,
+          model: openaiModel,
+          count: hookVariants,
+        });
+      } catch (err) {
+        log(`Hook generation failed: ${err.message}`);
+      }
+    }
+    const hookChoices = pickTopHooks(hooks, variantCount);
+    const primaryHook = hookChoices[0] || "";
+
     log("Generating script");
     const modelsToTry = Array.from(
       new Set([openaiModel, ...modelList, openaiFallbackModel].filter(Boolean))
@@ -440,6 +560,7 @@ async function run() {
           const finalPrompt = [
             `${prompt}\n\nLanguage: ${language}.`,
             "Include a clear call-to-action in the last sentence.",
+            primaryHook ? `Start with this exact hook: "${primaryHook}".` : "",
             topicLine,
           ]
             .filter(Boolean)
@@ -485,261 +606,316 @@ async function run() {
       )
     );
     const appendCta = getEnv("APPEND_CTA", "true").toLowerCase() !== "false";
-    if (appendCta && needsCta(script)) {
-      const cta = pickRandom(ctaList, "Save this and share it.");
-        script = `${script.trim()} ${cta}`.replace(/\s+/g, " ").trim();
+    const buildScriptVariant = (base, hook) => {
+      let output = hook ? replaceFirstSentence(base, hook) : base;
+      if (appendCta && needsCta(output)) {
+        const cta = pickRandom(ctaList, "Save this and share it.");
+        output = `${output.trim()} ${cta}`.replace(/\s+/g, " ").trim();
       }
       const maxScriptSeconds = maxDurationFinal || (viralMode ? 40 : 0);
-      script = trimScriptToDuration(script, maxScriptSeconds);
-      script = ensureMinScriptLength(script, minDurationFinal);
-      script = enforceLoopEnding(script);
-
-    if (useAiMetadata) {
-      try {
-        log("Generating metadata");
-        const metadata = await generateMetadata({
-          script,
-          channelContext,
-          apiKey: getEnv("OPENAI_API_KEY").trim(),
-          baseUrl: openaiBaseUrl,
-          model: usedModel,
-          variants: titleVariants,
-        });
-        if (!titleOverride) {
-          title = metadata.title || pickBestTitle(metadata.titles || []);
-        }
-        if (!descriptionOverride && metadata.description) description = metadata.description;
-        if (!tagsOverride.length && metadata.tags?.length) tags = metadata.tags;
-      } catch (err) {
-        log(`Metadata generation failed: ${err.message}`);
-      }
-    }
-
-    if (!title) {
-      title = buildTitleFromScript(script);
-    }
-    const titlePolish = getEnv("TITLE_POLISH", "true").toLowerCase() !== "false";
-    if (titlePolish) {
-      title = polishTitle(title);
-    }
-    if (!description) {
-      description = defaultDescription;
-    }
-    if (!tags.length) {
-      tags = defaultTags;
-    }
-    if (extraHashtags.length) {
-      description = withHashtags(description, extraHashtags);
-    }
-    if (!tags.includes("shorts")) {
-      tags = [...tags, "shorts"];
-    }
-    log(`Using title: ${title}`);
-    log(`Using tags: ${tags.join(", ") || "none"}`);
-
-    log("Generating voice");
-    const voiceResult = await generateVoice({
-      text: script,
-      voice,
-      elevenLabsApiKey: getEnv("ELEVENLABS_API_KEY").replace(/\s+/g, ""),
-      outDir: tempDir,
-    });
-    voiceFile = voiceResult.file;
-
-    const voicePath = path.join(tempDir, voiceFile);
-    const audioDuration = await getMediaDuration(voicePath);
-    const desiredVisualDuration =
-      maxDurationFinal || minDurationFinal || audioDuration || Number(getEnv("SCRIPT_DURATION_SECONDS", "30")) || 30;
-    let basePath = "";
-
-    const userVideos = downloadedBase.length
-      ? downloadedBase.map((file) => path.basename(file))
-      : await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
-    const userImages = await listMediaFiles(userImagesDir, [".jpg", ".jpeg", ".png", ".webp"]);
-
-    if (enableStockVideo) {
-      if (!pexelsApiKey && !pixabayApiKey) {
-        throw new Error("ENABLE_STOCK_VIDEO is true but no stock API key is set (PEXELS_API_KEY or PIXABAY_API_KEY).");
-      }
-      let parts = splitScriptIntoParts(script);
-      const surpriseEnabled = getEnv("SURPRISE_BROLL", "true").toLowerCase() !== "false";
-      if (surpriseEnabled) {
-        const surpriseTopics = parseCsv(
-          getEnv(
-            "SURPRISE_TOPICS",
-            "city night, ocean waves, sunrise, mountain peak, neon skyline, athlete training"
-          )
-        );
-        if (surpriseTopics.length && parts.length < 5) {
-          parts = [...parts, { text: pickRandom(surpriseTopics) }];
-        }
-      }
-      log(`Fetching stock visuals for ${parts.length} scenes`);
-      const scenes = await fetchStockScenes({
-        parts,
-        pexelsApiKey,
-        pixabayApiKey,
-        enableImages: enableImageMode,
-        tempDir: tempStockDir,
-      });
-
-      const cached = await loadCachedMedia();
-      const usableScenes = scenes.filter((scene) => scene.type !== "empty");
-      const stockAvailable = usableScenes.length > 0 || cached.videos.length || cached.images.length;
-      const userAvailable = userVideos.length || userImages.length;
-
-      const pickUserScene = (text) => {
-        if (userVideos.length) {
-          const file = userVideos[Math.floor(Math.random() * userVideos.length)];
-          const filePath = downloadedBase.length ? path.join(tempBaseDir, file) : path.join(baseDir, file);
-          return { type: "video", path: filePath, text, source: "user" };
-        }
-        if (userImages.length) {
-          const shuffled = [...userImages].sort(() => Math.random() - 0.5);
-          const count = Math.min(5, Math.max(3, shuffled.length));
-          const paths = shuffled.slice(0, count).map((file) => path.join(userImagesDir, file));
-          return { type: "images", paths, text, source: "user" };
-        }
-        return null;
-      };
-
-      const pickStockScene = (index, text) => {
-        if (usableScenes[index]) {
-          return { ...usableScenes[index], text };
-        }
-        if (usableScenes.length) {
-          const scene = usableScenes[Math.floor(Math.random() * usableScenes.length)];
-          return { ...scene, text };
-        }
-        if (cached.videos.length) {
-          const file = cached.videos[Math.floor(Math.random() * cached.videos.length)];
-          return { type: "video", path: file, text, source: "cache" };
-        }
-        if (cached.images.length) {
-          const shuffled = [...cached.images].sort(() => Math.random() - 0.5);
-          const count = Math.min(5, Math.max(3, shuffled.length));
-          return { type: "images", paths: shuffled.slice(0, count), text, source: "cache" };
-        }
-        return null;
-      };
-
-      const mixedScenes = parts.map((part, index) => {
-        const preferUser = enforceMix && userAvailable && stockAvailable ? index % 2 === 1 : userAvailable && !stockAvailable;
-        const scene = preferUser ? pickUserScene(part.text) || pickStockScene(index, part.text) : pickStockScene(index, part.text) || pickUserScene(part.text);
-        return scene || { type: "empty", text: part.text };
-      });
-
-      // Ensure at least one user and one stock scene when both are available.
-      if (enforceMix && userAvailable && stockAvailable) {
-        const usedUser = mixedScenes.some((scene) => scene?.source === "user");
-        const usedStock = mixedScenes.some((scene) => scene?.source === "stock" || scene?.source === "cache");
-        if (!usedUser) {
-          const idx = Math.floor(Math.random() * mixedScenes.length);
-          const replacement = pickUserScene(mixedScenes[idx]?.text || script);
-          if (replacement) mixedScenes[idx] = replacement;
-        }
-        if (!usedStock) {
-          const idx = Math.floor(Math.random() * mixedScenes.length);
-          const replacement = pickStockScene(idx, mixedScenes[idx]?.text || script);
-          if (replacement) mixedScenes[idx] = replacement;
-        }
-      }
-
-      const usableMixed = mixedScenes.filter((scene) => scene?.type !== "empty");
-      if (usableMixed.length) {
-        basePath = await generateStockBaseVideo({
-          scenes: usableMixed,
-          outDir: tempDir,
-          totalDuration: desiredVisualDuration,
-        });
-      } else {
-        log("No stock visuals found. Falling back to base-videos if available.");
-      }
-    }
-
-    if (!basePath) {
-      if (!userVideos.length) {
-        throw new Error("No base videos found. Add files to /base-videos or enable stock visuals.");
-      }
-      const baseVideo = userVideos[Math.floor(Math.random() * userVideos.length)];
-      basePath = downloadedBase.length ? path.join(tempBaseDir, baseVideo) : path.join(baseDir, baseVideo);
-    }
-
-    log("Creating video");
-    const musicPath = musicFile
-      ? downloadedMusic.length
-        ? path.join(tempMusicDir, musicFile)
-        : path.join(musicDir, musicFile)
-      : null;
-    const highlightWords = highlightEnabled ? extractKeywords(script, 6) : [];
-    const popupEnabled = getEnv("KEYWORD_POPUPS", "true").toLowerCase() !== "false";
-    const keywordPopups = popupEnabled ? extractKeywords(script, 8).slice(0, 3) : [];
-    const hookMaxWords = Number(getEnv("HOOK_MAX_WORDS", "10")) || 10;
-    const hookUpper = getEnv("HOOK_UPPERCASE", "true").toLowerCase() !== "false";
-    const subtitleStyle = {
-      fontSize: Math.round(randomBetween(60, 78)),
-      outline: Math.round(randomBetween(4, 7)),
-      yOffset: Math.round(randomBetween(170, 300)),
-      fontColor: "white",
-      highlightColor: pickRandom(["yellow", "cyan", "lime"], "yellow"),
-      popEnabled: true,
-      popScale: randomBetween(1.15, 1.28),
-      popDuration: randomBetween(0.1, 0.16),
-      box: Math.random() < 0.45,
-      boxColor: "black@0.45",
-      boxBorder: Math.round(randomBetween(8, 12)),
+      output = trimScriptToDuration(output, maxScriptSeconds);
+      output = ensureMinScriptLength(output, minDurationFinal);
+      output = enforceLoopEnding(output);
+      return output;
     };
-    subtitleStyle.glow = getEnv("TEXT_GLOW", "true").toLowerCase() !== "false";
-    const hookTextRaw = (script.split(/(?<=[.?!])\s+/)[0] || script)
-      .split(" ")
-      .slice(0, hookMaxWords)
-      .join(" ")
-      .trim();
-    const hookText = hookUpper ? hookTextRaw.toUpperCase() : hookTextRaw;
-    const hookBoost = getEnv("HOOK_BOOST", "true").toLowerCase() !== "false";
-    subtitleStyle.hookSize = hookBoost ? Math.round(subtitleStyle.fontSize * 1.85) : Math.round(subtitleStyle.fontSize * 1.4);
-    subtitleStyle.hookOutline = hookBoost ? Math.round(subtitleStyle.outline * 2.6) : Math.round(subtitleStyle.outline * 1.8);
-    subtitleStyle.hookY = Math.round(randomBetween(110, 180));
 
-    const musicVolume = Number(getEnv("MUSIC_VOLUME", "0.18"));
-    const watermarkText = getEnv("WATERMARK_TEXT", "").trim();
+    const scriptsToRender = [];
+    const hookLabels = ["A", "B", "C"];
+    const secondaryHook = hookChoices[1] || "";
+    const baseScript = buildScriptVariant(script, primaryHook);
+    scriptsToRender.push({ label: hookLabels[0], hook: primaryHook, script: baseScript });
+    if (abTest) {
+      const altHook = secondaryHook || primaryHook;
+      const altScript = buildScriptVariant(script, altHook);
+      scriptsToRender.push({ label: hookLabels[1], hook: altHook, script: altScript });
+    }
 
-    videoPath = await generateVideo({
-      baseVideoPath: basePath,
-      voicePath,
-      script,
-      outDir: tempDir,
-      title,
-      musicPath,
-      maxDuration: maxDurationFinal,
-      minDuration: minDurationFinal,
-      musicVolume: Number.isFinite(musicVolume) ? musicVolume : 0.18,
-      subtitleMode,
-      highlightWords,
-      subtitleStyle,
-      hookText,
-      keywordPopups,
-      watermarkText,
-    });
+    const accessToken = await getAccessToken();
+    for (const variant of scriptsToRender) {
+      const scriptVariant = variant.script;
+      let variantTitle = titleOverride;
+      let variantDescription = descriptionOverride;
+      let variantTags = tagsOverride;
+
+      if (useAiMetadata) {
+        try {
+          log("Generating metadata");
+          const metadata = await generateMetadata({
+            script: scriptVariant,
+            channelContext,
+            apiKey: getEnv("OPENAI_API_KEY").trim(),
+            baseUrl: openaiBaseUrl,
+            model: usedModel,
+            variants: titleVariants,
+          });
+          if (!titleOverride) {
+            variantTitle = metadata.title || pickBestTitle(metadata.titles || []);
+          }
+          if (!descriptionOverride && metadata.description) variantDescription = metadata.description;
+          if (!tagsOverride.length && metadata.tags?.length) variantTags = metadata.tags;
+        } catch (err) {
+          log(`Metadata generation failed: ${err.message}`);
+        }
+      }
+
+      if (!variantTitle) {
+        variantTitle = buildTitleFromScript(scriptVariant);
+      }
+      const titlePolish = getEnv("TITLE_POLISH", "true").toLowerCase() !== "false";
+      if (titlePolish) {
+        variantTitle = polishTitle(variantTitle);
+      }
+      if (!variantDescription) {
+        variantDescription = defaultDescription;
+      }
+      if (!variantTags.length) {
+        variantTags = defaultTags;
+      }
+      if (extraHashtags.length) {
+        variantDescription = withHashtags(variantDescription, extraHashtags);
+      }
+      if (!variantTags.includes("shorts")) {
+        variantTags = [...variantTags, "shorts"];
+      }
+      log(`Using title: ${variantTitle}`);
+      log(`Using tags: ${variantTags.join(", ") || "none"}`);
+
+      log("Generating voice");
+      const voiceResult = await generateVoice({
+        text: scriptVariant,
+        voice,
+        elevenLabsApiKey: getEnv("ELEVENLABS_API_KEY").replace(/\s+/g, ""),
+        outDir: tempDir,
+      });
+      voiceFile = voiceResult.file;
+
+      const voicePath = path.join(tempDir, voiceFile);
+      const audioDuration = await getMediaDuration(voicePath);
+      const desiredVisualDuration =
+        maxDurationFinal || minDurationFinal || audioDuration || Number(getEnv("SCRIPT_DURATION_SECONDS", "30")) || 30;
+      let basePath = "";
+
+      const userVideos = downloadedBase.length
+        ? downloadedBase.map((file) => path.basename(file))
+        : await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
+      const userImages = await listMediaFiles(userImagesDir, [".jpg", ".jpeg", ".png", ".webp"]);
+
+      if (enableStockVideo) {
+        if (!pexelsApiKey && !pixabayApiKey) {
+          throw new Error("ENABLE_STOCK_VIDEO is true but no stock API key is set (PEXELS_API_KEY or PIXABAY_API_KEY).");
+        }
+        let parts = splitScriptIntoParts(scriptVariant);
+        const surpriseEnabled = getEnv("SURPRISE_BROLL", "true").toLowerCase() !== "false";
+        if (surpriseEnabled) {
+          const surpriseTopics = parseCsv(
+            getEnv(
+              "SURPRISE_TOPICS",
+              "city night, ocean waves, sunrise, mountain peak, neon skyline, athlete training"
+            )
+          );
+          if (surpriseTopics.length && parts.length < 5) {
+            parts = [...parts, { text: pickRandom(surpriseTopics) }];
+          }
+        }
+        log(`Fetching stock visuals for ${parts.length} scenes`);
+        const scenes = await fetchStockScenes({
+          parts,
+          pexelsApiKey,
+          pixabayApiKey,
+          enableImages: enableImageMode,
+          tempDir: tempStockDir,
+        });
+
+        const cached = await loadCachedMedia();
+        const usableScenes = scenes.filter((scene) => scene.type !== "empty");
+        const stockAvailable = usableScenes.length > 0 || cached.videos.length || cached.images.length;
+        const userAvailable = userVideos.length || userImages.length;
+
+        const pickUserScene = (text) => {
+          if (userVideos.length) {
+            const file = userVideos[Math.floor(Math.random() * userVideos.length)];
+            const filePath = downloadedBase.length ? path.join(tempBaseDir, file) : path.join(baseDir, file);
+            return { type: "video", path: filePath, text, source: "user" };
+          }
+          if (userImages.length) {
+            const shuffled = [...userImages].sort(() => Math.random() - 0.5);
+            const count = Math.min(5, Math.max(3, shuffled.length));
+            const paths = shuffled.slice(0, count).map((file) => path.join(userImagesDir, file));
+            return { type: "images", paths, text, source: "user" };
+          }
+          return null;
+        };
+
+        const pickStockScene = (index, text) => {
+          if (usableScenes[index]) {
+            return { ...usableScenes[index], text };
+          }
+          if (usableScenes.length) {
+            const scene = usableScenes[Math.floor(Math.random() * usableScenes.length)];
+            return { ...scene, text };
+          }
+          if (cached.videos.length) {
+            const file = cached.videos[Math.floor(Math.random() * cached.videos.length)];
+            return { type: "video", path: file, text, source: "cache" };
+          }
+          if (cached.images.length) {
+            const shuffled = [...cached.images].sort(() => Math.random() - 0.5);
+            const count = Math.min(5, Math.max(3, shuffled.length));
+            return { type: "images", paths: shuffled.slice(0, count), text, source: "cache" };
+          }
+          return null;
+        };
+
+        const mixedScenes = parts.map((part, index) => {
+          const preferUser = enforceMix && userAvailable && stockAvailable ? index % 2 === 1 : userAvailable && !stockAvailable;
+          const scene = preferUser ? pickUserScene(part.text) || pickStockScene(index, part.text) : pickStockScene(index, part.text) || pickUserScene(part.text);
+          return scene || { type: "empty", text: part.text };
+        });
+
+        // Ensure at least one user and one stock scene when both are available.
+        if (enforceMix && userAvailable && stockAvailable) {
+          const usedUser = mixedScenes.some((scene) => scene?.source === "user");
+          const usedStock = mixedScenes.some((scene) => scene?.source === "stock" || scene?.source === "cache");
+          if (!usedUser) {
+            const idx = Math.floor(Math.random() * mixedScenes.length);
+            const replacement = pickUserScene(mixedScenes[idx]?.text || scriptVariant);
+            if (replacement) mixedScenes[idx] = replacement;
+          }
+          if (!usedStock) {
+            const idx = Math.floor(Math.random() * mixedScenes.length);
+            const replacement = pickStockScene(idx, mixedScenes[idx]?.text || scriptVariant);
+            if (replacement) mixedScenes[idx] = replacement;
+          }
+        }
+
+        const usableMixed = mixedScenes.filter((scene) => scene?.type !== "empty");
+        if (usableMixed.length) {
+          basePath = await generateStockBaseVideo({
+            scenes: usableMixed,
+            outDir: tempDir,
+            totalDuration: desiredVisualDuration,
+          });
+        } else {
+          log("No stock visuals found. Falling back to base-videos if available.");
+        }
+      }
+
+      if (!basePath) {
+        if (!userVideos.length) {
+          throw new Error("No base videos found. Add files to /base-videos or enable stock visuals.");
+        }
+        const baseVideo = userVideos[Math.floor(Math.random() * userVideos.length)];
+        basePath = downloadedBase.length ? path.join(tempBaseDir, baseVideo) : path.join(baseDir, baseVideo);
+      }
+
+      log("Creating video");
+      const musicPath = musicFile
+        ? downloadedMusic.length
+          ? path.join(tempMusicDir, musicFile)
+          : path.join(musicDir, musicFile)
+        : null;
+      const highlightWords = highlightEnabled ? extractKeywords(scriptVariant, 6) : [];
+      const popupEnabled = getEnv("KEYWORD_POPUPS", "true").toLowerCase() !== "false";
+      const keywordPopups = popupEnabled ? extractKeywords(scriptVariant, 8).slice(0, 3) : [];
+      const hookMaxWords = Number(getEnv("HOOK_MAX_WORDS", "10")) || 10;
+      const hookUpper = getEnv("HOOK_UPPERCASE", "true").toLowerCase() !== "false";
+      const subtitleStyle = {
+        fontSize: Math.round(randomBetween(60, 78)),
+        outline: Math.round(randomBetween(4, 7)),
+        yOffset: Math.round(randomBetween(170, 300)),
+        fontColor: "white",
+        highlightColor: pickRandom(["yellow", "cyan", "lime"], "yellow"),
+        popEnabled: true,
+        popScale: randomBetween(1.15, 1.28),
+        popDuration: randomBetween(0.1, 0.16),
+        box: Math.random() < 0.45,
+        boxColor: "black@0.45",
+        boxBorder: Math.round(randomBetween(8, 12)),
+      };
+      subtitleStyle.glow = getEnv("TEXT_GLOW", "true").toLowerCase() !== "false";
+      const hookTextRaw = (variant.hook || (scriptVariant.split(/(?<=[.?!])\s+/)[0] || scriptVariant))
+        .split(" ")
+        .slice(0, hookMaxWords)
+        .join(" ")
+        .trim();
+      const hookText = hookUpper ? hookTextRaw.toUpperCase() : hookTextRaw;
+      const hookBoost = getEnv("HOOK_BOOST", "true").toLowerCase() !== "false";
+      subtitleStyle.hookSize = hookBoost ? Math.round(subtitleStyle.fontSize * 1.85) : Math.round(subtitleStyle.fontSize * 1.4);
+      subtitleStyle.hookOutline = hookBoost ? Math.round(subtitleStyle.outline * 2.6) : Math.round(subtitleStyle.outline * 1.8);
+      subtitleStyle.hookY = Math.round(randomBetween(110, 180));
+
+      const musicVolume = Number(getEnv("MUSIC_VOLUME", "0.18"));
+      const watermarkText = getEnv("WATERMARK_TEXT", "").trim();
+
+      videoPath = await generateVideo({
+        baseVideoPath: basePath,
+        voicePath,
+        script: scriptVariant,
+        outDir: tempDir,
+        title: variantTitle,
+        musicPath,
+        maxDuration: maxDurationFinal,
+        minDuration: minDurationFinal,
+        musicVolume: Number.isFinite(musicVolume) ? musicVolume : 0.18,
+        subtitleMode,
+        highlightWords,
+        subtitleStyle,
+        hookText,
+        keywordPopups,
+        watermarkText,
+      });
+
+      log("Uploading to YouTube");
+      const uploadResult = await retry(() =>
+        uploadToYoutube({
+          accessToken,
+          refreshToken: getEnv("YOUTUBE_REFRESH_TOKEN"),
+          videoPath,
+          title: variantTitle,
+          description: variantDescription,
+          tags: variantTags,
+        })
+      );
+      log(`Upload complete: ${uploadResult?.id || "unknown id"}`);
+
+      const saveArtifacts = getEnv("SAVE_ARTIFACTS", "false").toLowerCase() === "true";
+      if (saveArtifacts && videoPath) {
+        const artifactsDir = path.join(process.cwd(), "artifacts");
+        await fs.mkdir(artifactsDir, { recursive: true });
+        const target = path.join(artifactsDir, path.basename(videoPath));
+        try {
+          await fs.copyFile(videoPath, target);
+        } catch (err) {
+          log(`Artifact copy failed: ${err.message}`);
+        }
+      }
+
+      const postComment = getEnv("POST_COMMENT", "false").toLowerCase() === "true";
+      const pinnedComment = getEnv("PINNED_COMMENT", "").trim();
+      if (postComment && pinnedComment && uploadResult?.id) {
+        try {
+          await postTopLevelComment({
+            accessToken,
+            refreshToken: getEnv("YOUTUBE_REFRESH_TOKEN"),
+            videoId: uploadResult.id,
+            text: pinnedComment,
+          });
+          log("Posted top-level comment. Pin manually in YouTube Studio.");
+        } catch (err) {
+          log(`Comment post failed: ${err.message}`);
+        }
+      }
+
+      const stats = await fetchVideoStats(accessToken, uploadResult?.id);
+      if (stats) {
+        updateLearning(learning, { topic: dailyTopic, hook: variant.hook, stats });
+        await saveLearningData(learningPath, learning);
+      }
+    }
   } catch (err) {
     log(`Video generation failed: ${err.message}`);
     throw err;
   }
-
-  log("Uploading to YouTube");
-  const accessToken = await getAccessToken();
-  const uploadResult = await retry(() =>
-    uploadToYoutube({
-      accessToken,
-      refreshToken: getEnv("YOUTUBE_REFRESH_TOKEN"),
-      videoPath,
-      title,
-      description,
-      tags,
-    })
-  );
-
-  log(`Upload complete: ${uploadResult?.id || "unknown id"}`);
 
   await cleanupTemp(tempDir);
 }

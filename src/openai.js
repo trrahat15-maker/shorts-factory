@@ -128,3 +128,40 @@ ${script}`;
     titles,
   };
 }
+
+export async function generateHooks({ topic = "", apiKey, baseUrl, model, count = 5 }) {
+  if (!apiKey) throw new Error("Missing OpenAI API key");
+  const prompt = [
+    "Generate short viral YouTube Shorts hooks.",
+    `Return exactly ${count} hooks.`,
+    "Each hook: 4-10 words, no quotes, no numbering.",
+    "Style: curiosity, fear, success, money, secrets.",
+    topic ? `Topic: ${topic}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const client = new OpenAI({
+    apiKey,
+    baseURL: baseUrl || undefined,
+  });
+
+  const response = await client.chat.completions.create({
+    model: model || "gpt-4o-mini",
+    messages: [
+      { role: "system", content: "You generate scroll-stopping hooks." },
+      { role: "user", content: prompt },
+    ],
+    max_tokens: 180,
+  });
+
+  const raw = response.choices?.[0]?.message?.content?.trim();
+  if (!raw) throw new Error("OpenAI returned no hooks");
+
+  const hooks = raw
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\d+[\).\s-]*/, "").trim())
+    .filter(Boolean);
+
+  return hooks.slice(0, count);
+}

@@ -157,6 +157,15 @@ Optional overrides:
 - `TITLE_VARIANTS` (default: 3)
 - `HASHTAGS` (comma separated, default: `#shorts,#motivation,#success`)
 - `OPENAI_BASE_URL`
+- `ENABLE_TRENDS` (`true` or `false`, default: `true`)
+- `TRENDS_REGION` (default: `US`)
+- `TRENDS_LANGUAGE` (default: `en-US`)
+- `TREND_MAX_TOPICS` (default: `15`)
+- `HOOK_VARIANTS` (default: `5`)
+- `AB_TEST` (`true` or `false`, default: `false`)
+- `POST_COMMENT` (`true` or `false`, default: `false`)
+- `PINNED_COMMENT` (text for a top-level comment)
+- `SAVE_ARTIFACTS` (`true` or `false`, default: `false`, saves MP4 + learning data as Actions artifact)
 - `ENABLE_STOCK_VIDEO` (`true` or `false`, default: `true`)
 - `ENABLE_IMAGE_MODE` (`true` or `false`, default: `true`)
 - `MIX_USER_MEDIA` (`true` or `false`, default: `true`)
@@ -256,6 +265,8 @@ node scripts/getYoutubeRefreshToken.js
 
 It will print a URL. Open it, approve access, and the script will output a refresh token.  
 Save that token as the GitHub Secret `YOUTUBE_REFRESH_TOKEN`.
+
+Note: the API can post a top-level comment, but **cannot pin comments**. If you enable `POST_COMMENT`, you must pin it manually in YouTube Studio.
 
 ### Use private URLs for base videos (optional)
 
