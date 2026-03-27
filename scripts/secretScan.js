@@ -11,6 +11,9 @@ const SKIP_DIRS = new Set([
   "build",
   "mobile/node_modules",
 ]);
+const SKIP_FILES = new Set([
+  "scripts/secretScan.js",
+]);
 
 const SKIP_EXTS = new Set([
   ".png",
@@ -61,6 +64,7 @@ async function scan() {
   const findings = [];
 
   for (const file of files) {
+    if (SKIP_FILES.has(file.relPath)) continue;
     if (isBinaryPath(file.relPath)) continue;
     let content;
     try {
