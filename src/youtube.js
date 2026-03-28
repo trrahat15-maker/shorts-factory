@@ -97,3 +97,50 @@ export async function postTopLevelComment({ accessToken, refreshToken, videoId, 
   });
   return res.data;
 }
+
+export async function uploadThumbnail({ accessToken, refreshToken, videoId, thumbnailPath }) {
+  if (!videoId || !thumbnailPath) return null;
+  const oauth2Client = createOAuthClient();
+  oauth2Client.setCredentials({ access_token: accessToken, refresh_token: refreshToken });
+  const youtube = google.youtube({ version: "v3", auth: oauth2Client });
+  const res = await youtube.thumbnails.set({
+    videoId,
+    media: {
+      body: fs.createReadStream(thumbnailPath),
+    },
+  });
+  return res.data;
+}
+
+export async function replyToTopComment({ accessToken, refreshToken, videoId, text }) {
+  if (!videoId || !text) return null;
+  const oauth2Client = createOAuthClient();
+  oauth2Client.setCredentials({ access_token: accessToken, refresh_token: refreshToken });
+  const youtube = google.youtube({ version: "v3", auth: oauth2Client });
+  const threads = await youtube.commentThreads.list({
+    part: ["snippet"],
+    videoId,
+    maxResults: 20,
+  });
+  const items = threads?.data?.items || [];
+  if (!items.length) return null;
+  const best = items
+    .map((item) => ({
+      id: item?.snippet?.topLevelComment?.id,
+      likes: Number(item?.snippet?.topLevelComment?.snippet?.likeCount || 0),
+    }))
+    .filter((item) => item.id)
+    .sort((a, b) => b.likes - a.likes)[0];
+  if (!best?.id) return null;
+
+  const res = await youtube.comments.insert({
+    part: ["snippet"],
+    requestBody: {
+      snippet: {
+        parentId: best.id,
+        textOriginal: text,
+      },
+    },
+  });
+  return res.data;
+}

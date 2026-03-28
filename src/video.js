@@ -168,6 +168,20 @@ function escapeDrawtext(text) {
     .replace(/\n/g, "\\n");
 }
 
+function buildThumbnailFilter(text, style = {}) {
+  const safe = escapeDrawtext(text || "");
+  const fontSize = Number(style.fontSize) || 96;
+  const outline = Number(style.outline) || 8;
+  const yPos = Number(style.yPos) || 200;
+  const color = style.color || "white";
+  const box = style.box !== false ? "box=1:boxcolor=black@0.55:boxborderw=14" : "";
+  if (!safe) return [];
+  return [
+    `drawtext=fontsize=${fontSize}:fontcolor=${color}:shadowcolor=black@0.7:shadowx=3:shadowy=3:` +
+      `borderw=${outline}:bordercolor=black:${box}:x=(w-text_w)/2:y=${yPos}:text='${safe}'`,
+  ];
+}
+
 function buildSubtitleFilters(subtitles, style = {}) {
   if (!Array.isArray(subtitles) || subtitles.length === 0) return [];
   const fadeIn = 0.2;
@@ -796,4 +810,27 @@ export async function generateStockBaseVideo({ scenes, outDir, totalDuration }) 
 
   const mergedPath = path.join(outDir, `stock-base-${Date.now()}.mp4`);
   return concatScenes(tempScenes, mergedPath);
+}
+
+export async function generateThumbnail({ videoPath, outDir, hookText, style = {} }) {
+  if (!videoPath) throw new Error("Missing videoPath for thumbnail.");
+  const outputFile = `thumb-${Date.now()}-${Math.floor(Math.random() * 1000)}.jpg`;
+  const outputPath = path.join(outDir, outputFile);
+  const offset = Number(style.offsetSeconds ?? 0.5);
+  const filters = [
+    "scale=1080:1920:force_original_aspect_ratio=increase",
+    "crop=1080:1920",
+  ].concat(buildThumbnailFilter(hookText, style));
+
+  return new Promise((resolve, reject) => {
+    ffmpeg()
+      .input(videoPath)
+      .inputOptions(["-ss", `${offset}`])
+      .videoFilters(filters.join(","))
+      .outputOptions(["-frames:v", "1", "-q:v", "2"])
+      .output(outputPath)
+      .on("error", (err) => reject(err))
+      .on("end", () => resolve(outputPath))
+      .run();
+  });
 }

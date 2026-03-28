@@ -5,8 +5,8 @@ import { google } from "googleapis";
 
 import { generateHooks, generateMetadata, generateScript } from "../src/openai.js";
 import { generateVoice } from "../src/voice.js";
-import { generateStockBaseVideo, generateVideo, getMediaDuration } from "../src/video.js";
-import { postTopLevelComment, uploadToYoutube } from "../src/youtube.js";
+import { generateStockBaseVideo, generateThumbnail, generateVideo, getMediaDuration } from "../src/video.js";
+import { postTopLevelComment, replyToTopComment, uploadThumbnail, uploadToYoutube } from "../src/youtube.js";
 import { extractKeywords, fetchStockScenes, splitScriptIntoParts, loadCachedMedia } from "../src/stock.js";
 import { buildRankedTopics, fetchGoogleTrends, fetchYoutubeTrends } from "../src/trends.js";
 
@@ -81,6 +81,8 @@ function scoreHook(text) {
   if (/[!?]/.test(lower)) score += 1;
   if (/(secret|wrong|nobody|stop|start|why|how)/.test(lower)) score += 2;
   if (/(money|success|fail|fear|discipline|focus)/.test(lower)) score += 2;
+  if (/(you|your)/.test(lower)) score += 1;
+  if (/(this|these)/.test(lower)) score += 1;
   const words = lower.split(/\s+/).filter(Boolean).length;
   if (words >= 4 && words <= 10) score += 2;
   return score;
@@ -101,6 +103,39 @@ function replaceFirstSentence(script, hook) {
     .filter(Boolean);
   if (!sentences.length) return hook;
   sentences[0] = hook.endsWith(".") || hook.endsWith("!") || hook.endsWith("?") ? hook : `${hook}.`;
+  return sentences.join(" ");
+}
+
+function trimFirstSentence(script, maxWords = 14) {
+  const sentences = script
+    .split(/(?<=[.?!])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!sentences.length) return script;
+  const words = sentences[0].split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) return script;
+  sentences[0] = `${words.slice(0, maxWords).join(" ")}.`;
+  return sentences.join(" ");
+}
+
+function stripWeakIntro(script) {
+  const patterns = [
+    /^today[,:\s]+/i,
+    /^in this video[,:\s]+/i,
+    /^i want to[,:\s]+/i,
+    /^let me[,:\s]+/i,
+    /^here's the thing[,:\s]+/i,
+  ];
+  const sentences = script
+    .split(/(?<=[.?!])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!sentences.length) return script;
+  let first = sentences[0];
+  patterns.forEach((pattern) => {
+    first = first.replace(pattern, "");
+  });
+  sentences[0] = first.trim() || sentences[0];
   return sentences.join(" ");
 }
 
@@ -578,6 +613,7 @@ async function run() {
   );
   const language = getEnv("SCRIPT_LANGUAGE", "English").trim();
   const topics = parseCsv(getEnv("TOPIC_LIST", "success,mindset,money,productivity"));
+  const blockedTopics = parseCsv(getEnv("TOPIC_BLOCKLIST", ""));
   const enableTrends = getEnv("ENABLE_TRENDS", "true").toLowerCase() !== "false";
   const trendRegion = getEnv("TRENDS_REGION", "US");
   const trendLanguage = getEnv("TRENDS_LANGUAGE", "en-US");
@@ -598,7 +634,12 @@ async function run() {
   const learnedTopics = Object.entries(learning?.topics || {})
     .sort((a, b) => b[1] - a[1])
     .map(([topic]) => topic);
-  const mergedTopics = Array.from(new Set([...(trendTopics || []), ...learnedTopics, ...topics]));
+  const mergedTopics = Array.from(new Set([...(trendTopics || []), ...learnedTopics, ...topics]))
+    .filter((topic) => {
+      if (!blockedTopics.length) return true;
+      const lower = String(topic).toLowerCase();
+      return !blockedTopics.some((blocked) => lower.includes(blocked.toLowerCase()));
+    });
   const dailyTopic = pickDailyTopic(mergedTopics.length ? mergedTopics : topics);
   const topicLine = dailyTopic ? `Topic: ${dailyTopic}` : "";
 
@@ -741,8 +782,11 @@ async function run() {
       )
     );
     const appendCta = getEnv("APPEND_CTA", "true").toLowerCase() !== "false";
+    const retentionMaxWords = Number(getEnv("RETENTION_INTRO_MAX_WORDS", "14")) || 14;
     const buildScriptVariant = (base, hook) => {
       let output = hook ? replaceFirstSentence(base, hook) : base;
+      output = stripWeakIntro(output);
+      output = trimFirstSentence(output, retentionMaxWords);
       if (appendCta && needsCta(output)) {
         const cta = pickRandom(ctaList, "Save this and share it.");
         output = `${output.trim()} ${cta}`.replace(/\s+/g, " ").trim();
@@ -1013,6 +1057,30 @@ async function run() {
       );
       log(`Upload complete: ${uploadResult?.id || "unknown id"}`);
 
+      const enableThumbnail = getEnv("ENABLE_THUMBNAIL", "true").toLowerCase() !== "false";
+      if (enableThumbnail && uploadResult?.id) {
+        try {
+          const thumbStyle = variant.label === "B"
+            ? { fontSize: 92, outline: 7, yPos: 240, color: "yellow" }
+            : { fontSize: 100, outline: 8, yPos: 200, color: "white" };
+          const thumbPath = await generateThumbnail({
+            videoPath,
+            outDir: tempDir,
+            hookText: hookTextRaw,
+            style: thumbStyle,
+          });
+          await uploadThumbnail({
+            accessToken,
+            refreshToken: getEnv("YOUTUBE_REFRESH_TOKEN"),
+            videoId: uploadResult.id,
+            thumbnailPath: thumbPath,
+          });
+          log("Thumbnail uploaded.");
+        } catch (err) {
+          log(`Thumbnail upload failed: ${err.message}`);
+        }
+      }
+
       const saveArtifacts = getEnv("SAVE_ARTIFACTS", "false").toLowerCase() === "true";
       if (saveArtifacts && videoPath) {
         const artifactsDir = path.join(process.cwd(), "artifacts");
@@ -1038,6 +1106,22 @@ async function run() {
           log("Posted top-level comment. Pin manually in YouTube Studio.");
         } catch (err) {
           log(`Comment post failed: ${err.message}`);
+        }
+      }
+
+      const autoReply = getEnv("AUTO_REPLY_COMMENTS", "false").toLowerCase() === "true";
+      const replyText = getEnv("REPLY_COMMENT_TEXT", "").trim();
+      if (autoReply && replyText && uploadResult?.id) {
+        try {
+          await replyToTopComment({
+            accessToken,
+            refreshToken: getEnv("YOUTUBE_REFRESH_TOKEN"),
+            videoId: uploadResult.id,
+            text: replyText,
+          });
+          log("Replied to top comment.");
+        } catch (err) {
+          log(`Auto-reply failed: ${err.message}`);
         }
       }
 

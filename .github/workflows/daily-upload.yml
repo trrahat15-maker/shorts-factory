@@ -57,6 +57,9 @@ jobs:
           POST_COMMENT: ${{ secrets.POST_COMMENT }}
           PINNED_COMMENT: ${{ secrets.PINNED_COMMENT }}
           SAVE_ARTIFACTS: ${{ secrets.SAVE_ARTIFACTS }}
+          ENABLE_THUMBNAIL: ${{ secrets.ENABLE_THUMBNAIL }}
+          AUTO_REPLY_COMMENTS: ${{ secrets.AUTO_REPLY_COMMENTS }}
+          REPLY_COMMENT_TEXT: ${{ secrets.REPLY_COMMENT_TEXT }}
           SMART_SCHEDULE: ${{ secrets.SMART_SCHEDULE }}
           SCHEDULE_TZ: ${{ secrets.SCHEDULE_TZ }}
           SCHEDULE_LEAD_MINUTES: ${{ secrets.SCHEDULE_LEAD_MINUTES }}
