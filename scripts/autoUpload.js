@@ -370,6 +370,107 @@ async function fetchVideoStats(accessToken, videoId) {
   }
 }
 
+function getHourInTimezone(date, timeZone) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    hour12: false,
+  });
+  return Number(formatter.format(date));
+}
+
+function getMinutesInTimezone(date, timeZone) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(date);
+  const hour = Number(parts.find((p) => p.type === "hour")?.value || 0);
+  const minute = Number(parts.find((p) => p.type === "minute")?.value || 0);
+  return hour * 60 + minute;
+}
+
+function isWithinWindow(nowMinutes, startMinutes, endMinutes) {
+  const day = 24 * 60;
+  const start = ((startMinutes % day) + day) % day;
+  const end = ((endMinutes % day) + day) % day;
+  if (start <= end) {
+    return nowMinutes >= start && nowMinutes <= end;
+  }
+  return nowMinutes >= start || nowMinutes <= end;
+}
+
+async function getBestPublishHour({
+  accessToken,
+  channelId,
+  maxVideos = 30,
+  minAgeHours = 6,
+  timeZone = "UTC",
+}) {
+  const youtube = google.youtube("v3");
+  const channelParams = {
+    part: ["contentDetails"],
+    access_token: accessToken,
+  };
+  if (channelId) {
+    channelParams.id = [channelId];
+  } else {
+    channelParams.mine = true;
+  }
+  const channelRes = await youtube.channels.list(channelParams);
+  const uploadsId = channelRes?.data?.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+  if (!uploadsId) return null;
+
+  const playlistRes = await youtube.playlistItems.list({
+    part: ["contentDetails"],
+    playlistId: uploadsId,
+    maxResults: Math.min(50, maxVideos),
+    access_token: accessToken,
+  });
+  const videoIds = (playlistRes?.data?.items || [])
+    .map((item) => item?.contentDetails?.videoId)
+    .filter(Boolean);
+  if (!videoIds.length) return null;
+
+  const videosRes = await youtube.videos.list({
+    part: ["snippet", "statistics"],
+    id: videoIds,
+    maxResults: videoIds.length,
+    access_token: accessToken,
+  });
+
+  const now = Date.now();
+  const buckets = new Map();
+  (videosRes?.data?.items || []).forEach((video) => {
+    const publishedAt = video?.snippet?.publishedAt;
+    if (!publishedAt) return;
+    const ageHours = Math.max(1, (now - new Date(publishedAt).getTime()) / 3600000);
+    if (ageHours < minAgeHours) return;
+    const views = Number(video?.statistics?.viewCount || 0);
+    const likes = Number(video?.statistics?.likeCount || 0);
+    const comments = Number(video?.statistics?.commentCount || 0);
+    const score = (views + likes * 2 + comments * 3) / ageHours;
+    const hour = getHourInTimezone(new Date(publishedAt), timeZone);
+    const bucket = buckets.get(hour) || { sum: 0, count: 0 };
+    bucket.sum += score;
+    bucket.count += 1;
+    buckets.set(hour, bucket);
+  });
+
+  let bestHour = null;
+  let bestScore = -1;
+  for (const [hour, data] of buckets.entries()) {
+    const avg = data.sum / Math.max(1, data.count);
+    if (avg > bestScore) {
+      bestScore = avg;
+      bestHour = hour;
+    }
+  }
+  return bestHour;
+}
+
 async function cleanupTemp(tempDir) {
   try {
     await fs.rm(tempDir, { recursive: true, force: true });
@@ -384,6 +485,40 @@ async function run() {
   if (shouldSkipRun()) {
     log("Skipping upload this run based on UPLOAD_CHANCE.");
     return;
+  }
+
+  const smartSchedule = getEnv("SMART_SCHEDULE", "false").toLowerCase() === "true";
+  if (smartSchedule) {
+    const timeZone = getEnv("SCHEDULE_TZ", "UTC");
+    const leadMinutes = Number(getEnv("SCHEDULE_LEAD_MINUTES", "15")) || 15;
+    const windowMinutes = Number(getEnv("SCHEDULE_WINDOW_MINUTES", "10")) || 10;
+    const minAgeHours = Number(getEnv("SCHEDULE_MIN_AGE_HOURS", "6")) || 6;
+    const maxVideos = Number(getEnv("SCHEDULE_LOOKBACK_VIDEOS", "30")) || 30;
+    const channelId = getEnv("CHANNEL_ID", "").trim();
+    try {
+      const accessToken = await getAccessToken();
+      const bestHour = await getBestPublishHour({
+        accessToken,
+        channelId: channelId || undefined,
+        maxVideos,
+        minAgeHours,
+        timeZone,
+      });
+      if (bestHour === null || Number.isNaN(bestHour)) {
+        log("Smart schedule could not determine a best hour. Proceeding normally.");
+      } else {
+        const nowMinutes = getMinutesInTimezone(new Date(), timeZone);
+        const runStart = bestHour * 60 - leadMinutes;
+        const runEnd = runStart + windowMinutes;
+        log(`Best publish hour (local ${timeZone}): ${bestHour}:00`);
+        if (!isWithinWindow(nowMinutes, runStart, runEnd)) {
+          log("Not within the scheduled upload window. Exiting.");
+          return;
+        }
+      }
+    } catch (err) {
+      log(`Smart schedule failed: ${err.message}`);
+    }
   }
 
   const tempDir = path.join(os.tmpdir(), "shorts-factory-daily");

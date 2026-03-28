@@ -2,8 +2,7 @@ name: Daily Upload
 
 on:
   schedule:
-    - cron: "0 9 * * *"
-    - cron: "0 21 * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -58,6 +57,12 @@ jobs:
           POST_COMMENT: ${{ secrets.POST_COMMENT }}
           PINNED_COMMENT: ${{ secrets.PINNED_COMMENT }}
           SAVE_ARTIFACTS: ${{ secrets.SAVE_ARTIFACTS }}
+          SMART_SCHEDULE: ${{ secrets.SMART_SCHEDULE }}
+          SCHEDULE_TZ: ${{ secrets.SCHEDULE_TZ }}
+          SCHEDULE_LEAD_MINUTES: ${{ secrets.SCHEDULE_LEAD_MINUTES }}
+          SCHEDULE_WINDOW_MINUTES: ${{ secrets.SCHEDULE_WINDOW_MINUTES }}
+          SCHEDULE_MIN_AGE_HOURS: ${{ secrets.SCHEDULE_MIN_AGE_HOURS }}
+          SCHEDULE_LOOKBACK_VIDEOS: ${{ secrets.SCHEDULE_LOOKBACK_VIDEOS }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           ENABLE_STOCK_VIDEO: ${{ secrets.ENABLE_STOCK_VIDEO }}
