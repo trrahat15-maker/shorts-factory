@@ -94,6 +94,109 @@ function filenameToText(fileName) {
   return base.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function sanitizeFileName(input, maxLength = 70) {
+  if (!input) return `backup-${Date.now()}`;
+  const firstLine = String(input).split("\n")[0] || input;
+  const safe = firstLine
+    .replace(/[^a-zA-Z0-9-_ ]/g, "")
+    .trim()
+    .replace(/\s+/g, "-");
+  const cropped = safe.length > maxLength ? safe.slice(0, maxLength) : safe;
+  return cropped || `backup-${Date.now()}`;
+}
+
+async function dropboxFetch(url, token, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body || {}),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Dropbox API error ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+async function listDropboxVideos({ token, folderPath }) {
+  if (!token || !folderPath) return [];
+  const files = [];
+  let hasMore = true;
+  let cursor = null;
+  while (hasMore) {
+    const endpoint = cursor
+      ? "https://api.dropboxapi.com/2/files/list_folder/continue"
+      : "https://api.dropboxapi.com/2/files/list_folder";
+    const payload = cursor ? { cursor } : { path: folderPath };
+    const data = await dropboxFetch(endpoint, token, payload);
+    const entries = data?.entries || [];
+    entries.forEach((entry) => {
+      if (entry?.[".tag"] !== "file") return;
+      const name = entry?.name || "";
+      const lower = name.toLowerCase();
+      if (![".mp4", ".mov", ".mkv", ".webm"].some((ext) => lower.endsWith(ext))) return;
+      files.push({
+        name,
+        path: entry.path_lower || entry.path_display,
+        time: new Date(entry.server_modified || 0).getTime(),
+      });
+    });
+    hasMore = Boolean(data?.has_more);
+    cursor = data?.cursor;
+  }
+  return files.sort((a, b) => b.time - a.time);
+}
+
+async function getDropboxTempLink({ token, filePath }) {
+  const data = await dropboxFetch("https://api.dropboxapi.com/2/files/get_temporary_link", token, {
+    path: filePath,
+  });
+  return data?.link || "";
+}
+
+async function downloadDropboxFile({ token, filePath, destDir, fallbackName }) {
+  const link = await getDropboxTempLink({ token, filePath });
+  if (!link) throw new Error("Dropbox temporary link is empty.");
+  const response = await fetch(link);
+  if (!response.ok) {
+    throw new Error(`Failed to download Dropbox file: ${response.status}`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const fileName = fallbackName || path.basename(filePath);
+  const destPath = path.join(destDir, fileName);
+  await fs.writeFile(destPath, buffer);
+  return destPath;
+}
+
+async function uploadFileToDropbox({ token, folderPath, filePath, nameBase }) {
+  if (!token || !folderPath || !filePath) return null;
+  const fileName = `${sanitizeFileName(nameBase)}-${Date.now()}.mp4`;
+  const dropboxPath = `${folderPath}/${fileName}`.replace(/\/+/g, "/");
+  const contents = await fs.readFile(filePath);
+  const res = await fetch("https://content.dropboxapi.com/2/files/upload", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/octet-stream",
+      "Dropbox-API-Arg": JSON.stringify({
+        path: dropboxPath,
+        mode: "add",
+        autorename: true,
+        mute: true,
+      }),
+    },
+    body: contents,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Dropbox upload failed ${res.status}: ${text}`);
+  }
+  return dropboxPath;
+}
+
 function parseUrlList(raw) {
   return (raw || "")
     .split(",")
@@ -804,6 +907,8 @@ async function run() {
 
   const baseVideoUrls = parseUrlList(getEnv("BASE_VIDEO_URLS"));
   const musicUrls = parseUrlList(getEnv("MUSIC_URLS"));
+  const dropboxToken = getEnv("DROPBOX_ACCESS_TOKEN", "").trim();
+  const dropboxFolder = getEnv("DROPBOX_FOLDER_PATH", "").trim();
 
   const downloadedBase = await downloadMediaList(baseVideoUrls, tempBaseDir, "base-video");
   const downloadedMusic = await downloadMediaList(musicUrls, tempMusicDir, "music");
@@ -814,11 +919,44 @@ async function run() {
     const backupCount = Number(getEnv("BACKUP_UPLOAD_COUNT", "1")) || 1;
     const localVideos = await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
     const downloadedVideos = downloadedBase.map((file) => path.basename(file));
+    let dropboxVideos = [];
+    if (dropboxToken && dropboxFolder) {
+      try {
+        dropboxVideos = await listDropboxVideos({ token: dropboxToken, folderPath: dropboxFolder });
+      } catch (err) {
+        log(`Dropbox list failed: ${err.message}`);
+      }
+    }
+    const dropboxDownloads = [];
+    if (dropboxVideos.length) {
+      const needed = Math.min(backupCount, dropboxVideos.length);
+      for (let i = 0; i < needed; i += 1) {
+        const item = dropboxVideos[i];
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const pathDownloaded = await downloadDropboxFile({
+            token: dropboxToken,
+            filePath: item.path,
+            destDir: tempBaseDir,
+            fallbackName: item.name,
+          });
+          dropboxDownloads.push({ path: pathDownloaded, name: item.name, time: item.time });
+        } catch (err) {
+          log(`Dropbox download failed for ${item.name}: ${err.message}`);
+        }
+      }
+    }
     const candidates = [
       ...downloadedVideos.map((file) => ({
         path: path.join(tempBaseDir, file),
         name: file,
         deletable: false,
+      })),
+      ...dropboxDownloads.map((file) => ({
+        path: file.path,
+        name: file.name,
+        deletable: false,
+        time: file.time,
       })),
       ...localVideos.map((file) => ({
         path: path.join(baseDir, file),
@@ -1361,6 +1499,22 @@ async function run() {
       log(`Studio URL: https://studio.youtube.com/video/${uploadedId}/edit`);
       log(`Channel ID: ${channelId}`);
 
+      const uploadBackup = getEnv("DROPBOX_UPLOAD_BACKUPS", "false").toLowerCase() === "true";
+      if (uploadBackup && dropboxToken && dropboxFolder && videoPath) {
+        try {
+          const nameBase = variantDescription || variantTitle;
+          const dropboxPath = await uploadFileToDropbox({
+            token: dropboxToken,
+            folderPath: dropboxFolder,
+            filePath: videoPath,
+            nameBase,
+          });
+          log(`Dropbox backup saved: ${dropboxPath}`);
+        } catch (err) {
+          log(`Dropbox backup upload failed: ${err.message}`);
+        }
+      }
+
       const enableThumbnail = getEnv("ENABLE_THUMBNAIL", "true").toLowerCase() !== "false";
       if (enableThumbnail && uploadResult?.id) {
         try {
@@ -1444,12 +1598,40 @@ async function run() {
         const accessToken = await getAccessToken();
         const localVideos = await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
         const downloadedVideos = downloadedBase.map((file) => path.basename(file));
+        let dropboxPick = null;
+        if (dropboxToken && dropboxFolder) {
+          try {
+            const dropboxVideos = await listDropboxVideos({ token: dropboxToken, folderPath: dropboxFolder });
+            const first = dropboxVideos[0];
+            if (first) {
+              const downloaded = await downloadDropboxFile({
+                token: dropboxToken,
+                filePath: first.path,
+                destDir: tempBaseDir,
+                fallbackName: first.name,
+              });
+              dropboxPick = { path: downloaded, name: first.name, time: first.time };
+            }
+          } catch (err) {
+            log(`Dropbox fallback failed: ${err.message}`);
+          }
+        }
         const candidates = [
           ...downloadedVideos.map((file) => ({
             path: path.join(tempBaseDir, file),
             name: file,
             deletable: false,
           })),
+          ...(dropboxPick
+            ? [
+                {
+                  path: dropboxPick.path,
+                  name: dropboxPick.name,
+                  deletable: false,
+                  time: dropboxPick.time,
+                },
+              ]
+            : []),
           ...localVideos.map((file) => ({
             path: path.join(baseDir, file),
             name: file,
