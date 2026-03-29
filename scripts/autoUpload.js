@@ -577,8 +577,12 @@ async function downloadMediaList(urls, destDir, label) {
   for (let i = 0; i < urls.length; i += 1) {
     const url = urls[i];
     log(`Downloading ${label} ${i + 1}/${urls.length}`);
-    const filePath = await downloadFile(url, destDir, `${label}-${i + 1}`);
-    results.push(filePath);
+    try {
+      const filePath = await downloadFile(url, destDir, `${label}-${i + 1}`);
+      results.push(filePath);
+    } catch (err) {
+      log(`Download failed for ${url}: ${err.message}`);
+    }
   }
   return results;
 }
