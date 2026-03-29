@@ -74,6 +74,20 @@ async function pickNewestFile(dir, files) {
   return stats[0]?.file || files[0];
 }
 
+async function sortByNewest(entries) {
+  const withStats = await Promise.all(
+    entries.map(async (entry) => {
+      try {
+        const stat = await fs.stat(entry.path);
+        return { ...entry, time: stat.mtimeMs || 0 };
+      } catch {
+        return { ...entry, time: 0 };
+      }
+    })
+  );
+  return withStats.sort((a, b) => b.time - a.time);
+}
+
 function filenameToText(fileName) {
   if (!fileName) return "";
   const base = path.basename(fileName, path.extname(fileName));
@@ -359,6 +373,53 @@ async function uploadManualBaseVideo({
     }
   }
 
+  return result;
+}
+
+async function uploadManualBaseVideoPath({
+  filePath,
+  fileName,
+  deleteAfter,
+  accessToken,
+  titleOverride,
+  descriptionOverride,
+  tagsOverride,
+  extraHashtags,
+  defaultDescription,
+  defaultTags,
+}) {
+  const fileLabel = filenameToText(fileName || path.basename(filePath)) || "Manual Upload";
+  const useTitleFromName = getEnv("MANUAL_TITLE_FROM_FILENAME", "true").toLowerCase() !== "false";
+  const useDescFromName = getEnv("MANUAL_DESCRIPTION_FROM_FILENAME", "true").toLowerCase() !== "false";
+
+  let title = titleOverride || (useTitleFromName ? fileLabel : "");
+  let description = descriptionOverride || (useDescFromName ? fileLabel : defaultDescription);
+  let tags = tagsOverride?.length ? tagsOverride : defaultTags;
+  if (extraHashtags?.length) {
+    description = withHashtags(description, extraHashtags);
+  }
+  if (!tags.includes("shorts")) {
+    tags = [...tags, "shorts"];
+  }
+
+  log(`Manual upload using backup video: ${fileName || path.basename(filePath)}`);
+  const result = await uploadToYoutube({
+    accessToken,
+    refreshToken: getEnv("YOUTUBE_REFRESH_TOKEN"),
+    videoPath: filePath,
+    title,
+    description,
+    tags,
+  });
+
+  if (deleteAfter) {
+    try {
+      await fs.rm(filePath, { force: true });
+      log(`Deleted backup video after upload: ${fileName || path.basename(filePath)}`);
+    } catch (err) {
+      log(`Failed to delete backup video: ${err.message}`);
+    }
+  }
   return result;
 }
 
@@ -742,6 +803,53 @@ async function run() {
 
   const downloadedBase = await downloadMediaList(baseVideoUrls, tempBaseDir, "base-video");
   const downloadedMusic = await downloadMediaList(musicUrls, tempMusicDir, "music");
+
+  const backupOnly = getEnv("BACKUP_ONLY", "false").toLowerCase() === "true";
+  if (backupOnly) {
+    const accessToken = await getAccessToken();
+    const backupCount = Number(getEnv("BACKUP_UPLOAD_COUNT", "1")) || 1;
+    const localVideos = await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
+    const downloadedVideos = downloadedBase.map((file) => path.basename(file));
+    const candidates = [
+      ...downloadedVideos.map((file) => ({
+        path: path.join(tempBaseDir, file),
+        name: file,
+        deletable: false,
+      })),
+      ...localVideos.map((file) => ({
+        path: path.join(baseDir, file),
+        name: file,
+        deletable: getEnv("DELETE_BASE_VIDEO_AFTER_UPLOAD", "true").toLowerCase() !== "false",
+      })),
+    ];
+
+    if (!candidates.length) {
+      throw new Error("BACKUP_ONLY is true but no backup videos are available.");
+    }
+
+    const ordered = await sortByNewest(candidates);
+    const count = Math.min(backupCount, ordered.length);
+    log(`Backup-only mode: uploading ${count} backup video(s).`);
+    for (let i = 0; i < count; i += 1) {
+      const item = ordered[i];
+      // eslint-disable-next-line no-await-in-loop
+      await uploadManualBaseVideoPath({
+        filePath: item.path,
+        fileName: item.name,
+        deleteAfter: item.deletable,
+        accessToken,
+        titleOverride: getEnv("VIDEO_TITLE", "").trim(),
+        descriptionOverride: getEnv("VIDEO_DESCRIPTION", "").trim(),
+        tagsOverride: parseCsv(getEnv("VIDEO_TAGS", "")),
+        extraHashtags: parseCsv(getEnv("HASHTAGS", "#shorts,#motivation,#success")),
+        defaultDescription:
+          "Daily motivational shorts.\n\nSubscribe for more success mindset content.\n\n#motivation #success #discipline",
+        defaultTags: ["motivation", "success", "discipline", "shorts"],
+      });
+    }
+    await cleanupTemp(tempDir);
+    return;
+  }
 
   const musicTracks = downloadedMusic.length
     ? downloadedMusic.map((file) => path.basename(file))

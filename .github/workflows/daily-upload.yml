@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "auto = generate new video, backup = upload from backup list"
+        required: true
+        default: "auto"
+      backup_count:
+        description: "How many backup videos to upload (backup mode only)"
+        required: false
+        default: "1"
 
 permissions:
   contents: read
@@ -38,6 +47,8 @@ jobs:
         env:
           UPLOAD_CHANCE: ${{ github.event.schedule == '0 21 * * *' && '0.6' || '1' }}
           FORCE_UPLOAD: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
+          BACKUP_ONLY: ${{ github.event.inputs.mode == 'backup' && 'true' || 'false' }}
+          BACKUP_UPLOAD_COUNT: ${{ github.event.inputs.backup_count || '1' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
