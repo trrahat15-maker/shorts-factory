@@ -51,6 +51,29 @@ async function listMediaFiles(dir, exts) {
   }
 }
 
+async function pickNewestFile(dir, files) {
+  if (!files.length) return "";
+  const stats = await Promise.all(
+    files.map(async (file) => {
+      try {
+        const fullPath = path.join(dir, file);
+        const stat = await fs.stat(fullPath);
+        return { file, time: stat.mtimeMs };
+      } catch {
+        return { file, time: 0 };
+      }
+    })
+  );
+  stats.sort((a, b) => b.time - a.time);
+  return stats[0]?.file || files[0];
+}
+
+function filenameToText(fileName) {
+  if (!fileName) return "";
+  const base = path.basename(fileName, path.extname(fileName));
+  return base.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
 function parseUrlList(raw) {
   return (raw || "")
     .split(",")
@@ -277,6 +300,60 @@ function withHashtags(description, hashtags) {
   const missing = hashtags.filter((tag) => !description.includes(tag));
   if (!missing.length) return description;
   return `${description.trim()}\n\n${missing.join(" ")}`;
+}
+
+async function uploadManualBaseVideo({
+  baseDir,
+  tempDir,
+  accessToken,
+  titleOverride,
+  descriptionOverride,
+  tagsOverride,
+  extraHashtags,
+  defaultDescription,
+  defaultTags,
+}) {
+  const userVideos = await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
+  if (!userVideos.length) return null;
+
+  const newest = await pickNewestFile(baseDir, userVideos);
+  const basePath = path.join(baseDir, newest);
+  const fileLabel = filenameToText(newest) || "Manual Upload";
+
+  const useTitleFromName = getEnv("MANUAL_TITLE_FROM_FILENAME", "true").toLowerCase() !== "false";
+  const useDescFromName = getEnv("MANUAL_DESCRIPTION_FROM_FILENAME", "true").toLowerCase() !== "false";
+  const deleteAfterUpload = getEnv("DELETE_BASE_VIDEO_AFTER_UPLOAD", "true").toLowerCase() !== "false";
+
+  let title = titleOverride || (useTitleFromName ? fileLabel : "");
+  let description = descriptionOverride || (useDescFromName ? fileLabel : defaultDescription);
+  let tags = tagsOverride?.length ? tagsOverride : defaultTags;
+  if (extraHashtags?.length) {
+    description = withHashtags(description, extraHashtags);
+  }
+  if (!tags.includes("shorts")) {
+    tags = [...tags, "shorts"];
+  }
+
+  log(`Manual fallback upload using base video: ${newest}`);
+  const result = await uploadToYoutube({
+    accessToken,
+    refreshToken: getEnv("YOUTUBE_REFRESH_TOKEN"),
+    videoPath: basePath,
+    title,
+    description,
+    tags,
+  });
+
+  if (deleteAfterUpload) {
+    try {
+      await fs.rm(basePath, { force: true });
+      log(`Deleted uploaded base video: ${newest}`);
+    } catch (err) {
+      log(`Failed to delete base video ${newest}: ${err.message}`);
+    }
+  }
+
+  return result;
 }
 
 function scoreTitle(title) {
@@ -697,6 +774,7 @@ async function run() {
 
   let voiceFile = "";
   let videoPath = "";
+  let fallbackSucceeded = false;
 
   try {
     const hookVariants = Number(getEnv("HOOK_VARIANTS", "5")) || 5;
@@ -1055,7 +1133,13 @@ async function run() {
           tags: variantTags,
         })
       );
-      log(`Upload complete: ${uploadResult?.id || "unknown id"}`);
+      const uploadedId = uploadResult?.id || "unknown-id";
+      const channelId =
+        uploadResult?.snippet?.channelId || getEnv("CHANNEL_ID", "").trim() || "unknown-channel";
+      log(`Upload complete: ${uploadedId}`);
+      log(`Watch URL: https://www.youtube.com/watch?v=${uploadedId}`);
+      log(`Studio URL: https://studio.youtube.com/video/${uploadedId}/edit`);
+      log(`Channel ID: ${channelId}`);
 
       const enableThumbnail = getEnv("ENABLE_THUMBNAIL", "true").toLowerCase() !== "false";
       if (enableThumbnail && uploadResult?.id) {
@@ -1133,10 +1217,39 @@ async function run() {
     }
   } catch (err) {
     log(`Video generation failed: ${err.message}`);
-    throw err;
+    const fallbackEnabled = getEnv("FALLBACK_BASE_UPLOAD", "true").toLowerCase() !== "false";
+    if (fallbackEnabled) {
+      try {
+        log("Attempting manual base-video fallback upload.");
+        const accessToken = await getAccessToken();
+        const fallbackResult = await uploadManualBaseVideo({
+          baseDir,
+          tempDir,
+          accessToken,
+          titleOverride,
+          descriptionOverride,
+          tagsOverride,
+          extraHashtags,
+          defaultDescription,
+          defaultTags,
+        });
+        if (fallbackResult?.id) {
+          log(`Fallback upload complete: ${fallbackResult.id}`);
+          fallbackSucceeded = true;
+        } else {
+          log("Fallback upload skipped (no base videos available).");
+        }
+      } catch (fallbackErr) {
+        log(`Fallback upload failed: ${fallbackErr.message}`);
+      }
+    }
+    if (!fallbackSucceeded) {
+      throw err;
+    }
   }
 
   await cleanupTemp(tempDir);
+  if (fallbackSucceeded) return;
 }
 
 run().catch(async (err) => {
