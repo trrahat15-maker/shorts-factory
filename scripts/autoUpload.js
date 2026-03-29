@@ -158,6 +158,7 @@ async function getDropboxTempLink({ token, filePath }) {
 }
 
 async function downloadDropboxFile({ token, filePath, destDir, fallbackName }) {
+  await fs.mkdir(destDir, { recursive: true });
   const link = await getDropboxTempLink({ token, filePath });
   if (!link) throw new Error("Dropbox temporary link is empty.");
   const response = await fetch(link);
