@@ -37,12 +37,13 @@ jobs:
         run: node scripts/autoUpload.js
         env:
           UPLOAD_CHANCE: ${{ github.event.schedule == '0 21 * * *' && '0.6' || '1' }}
+          FORCE_UPLOAD: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
-          YOUTUBE_PRIVACY_STATUS: ${{ secrets.YOUTUBE_PRIVACY_STATUS }}
+          YOUTUBE_PRIVACY_STATUS: ${{ secrets.YOUTUBE_PRIVACY_STATUS || 'public' }}
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           OPENAI_MODEL_LIST: ${{ secrets.OPENAI_MODEL_LIST }}

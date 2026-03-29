@@ -687,13 +687,14 @@ async function cleanupTemp(tempDir) {
 async function run() {
   requireEnv();
 
-  if (shouldSkipRun()) {
+  const forceUpload = getEnv("FORCE_UPLOAD", "false").toLowerCase() === "true";
+  if (!forceUpload && shouldSkipRun()) {
     log("Skipping upload this run based on UPLOAD_CHANCE.");
     return;
   }
 
   const smartSchedule = getEnv("SMART_SCHEDULE", "false").toLowerCase() === "true";
-  if (smartSchedule) {
+  if (smartSchedule && !forceUpload) {
     const timeZone = getEnv("SCHEDULE_TZ", "UTC");
     const leadMinutes = Number(getEnv("SCHEDULE_LEAD_MINUTES", "15")) || 15;
     const windowMinutes = Number(getEnv("SCHEDULE_WINDOW_MINUTES", "10")) || 10;
@@ -1240,6 +1241,10 @@ async function run() {
       const channelId =
         uploadResult?.snippet?.channelId || getEnv("CHANNEL_ID", "").trim() || "unknown-channel";
       log(`Upload complete: ${uploadedId}`);
+      const privacy = uploadResult?.status?.privacyStatus;
+      const channelTitle = uploadResult?.snippet?.channelTitle;
+      if (privacy) log(`Privacy: ${privacy}`);
+      if (channelTitle) log(`Channel: ${channelTitle}`);
       log(`Watch URL: https://www.youtube.com/watch?v=${uploadedId}`);
       log(`Studio URL: https://studio.youtube.com/video/${uploadedId}/edit`);
       log(`Channel ID: ${channelId}`);

@@ -223,6 +223,7 @@ Optional overrides:
 - `TRIM_SILENCE` (`true` or `false`, default: `true`)
 - `SILENCE_THRESHOLD` (default: `-30dB`)
 - `SILENCE_DURATION` (default: `0.2`)
+- `FORCE_UPLOAD` (`true` or `false`, default: `false`, bypass schedule + upload chance for manual runs)
 - `COLOR_GRADE_PRESET` (`auto`, `warm`, `cool`, `vivid`, `cinematic`, `punchy`, `soft`)
 - `BEAT_SYNC` (`true` or `false`, default: `true`)
 - `MUSIC_BPM` (number, optional)
