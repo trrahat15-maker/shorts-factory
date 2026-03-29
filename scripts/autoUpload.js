@@ -5,7 +5,13 @@ import { google } from "googleapis";
 
 import { generateHooks, generateMetadata, generateScript } from "../src/openai.js";
 import { generateVoice } from "../src/voice.js";
-import { generateStockBaseVideo, generateThumbnail, generateVideo, getMediaDuration } from "../src/video.js";
+import {
+  generateProceduralBaseVideo,
+  generateStockBaseVideo,
+  generateThumbnail,
+  generateVideo,
+  getMediaDuration,
+} from "../src/video.js";
 import { postTopLevelComment, replyToTopComment, uploadThumbnail, uploadToYoutube } from "../src/youtube.js";
 import { extractKeywords, fetchStockScenes, splitScriptIntoParts, loadCachedMedia } from "../src/stock.js";
 import { buildRankedTopics, fetchGoogleTrends, fetchYoutubeTrends } from "../src/trends.js";
@@ -352,6 +358,93 @@ async function uploadManualBaseVideo({
       log(`Failed to delete base video ${newest}: ${err.message}`);
     }
   }
+
+  return result;
+}
+
+async function uploadGeneratedFallback({
+  tempDir,
+  accessToken,
+  script,
+  voicePath,
+  voice,
+  titleOverride,
+  descriptionOverride,
+  tagsOverride,
+  extraHashtags,
+  defaultDescription,
+  defaultTags,
+  minDuration,
+  maxDuration,
+}) {
+  const fallbackScript =
+    script ||
+    "You're closer than you think. Keep moving, keep building, and let today prove what you can become.";
+  let finalVoicePath = voicePath;
+  if (!finalVoicePath) {
+    const voiceResult = await generateVoice({
+      text: fallbackScript,
+      voice,
+      elevenLabsApiKey: getEnv("ELEVENLABS_API_KEY").replace(/\s+/g, ""),
+      outDir: tempDir,
+    });
+    finalVoicePath = path.join(tempDir, voiceResult.file);
+  }
+
+  const audioDuration = await getMediaDuration(finalVoicePath);
+  const targetDuration = Math.max(
+    minDuration || 20,
+    Math.min(maxDuration || 40, audioDuration || minDuration || 20)
+  );
+  const basePath = await generateProceduralBaseVideo({ outDir: tempDir, duration: targetDuration });
+  const title = titleOverride || "Daily Motivation";
+  let description = descriptionOverride || defaultDescription;
+  let tags = tagsOverride?.length ? tagsOverride : defaultTags;
+  if (extraHashtags?.length) {
+    description = withHashtags(description, extraHashtags);
+  }
+  if (!tags.includes("shorts")) {
+    tags = [...tags, "shorts"];
+  }
+
+  const videoPath = await generateVideo({
+    baseVideoPath: basePath,
+    voicePath: finalVoicePath,
+    script: fallbackScript,
+    outDir: tempDir,
+    title,
+    musicPath: null,
+    maxDuration,
+    minDuration,
+    subtitleMode: getEnv("SUBTITLE_MODE", "word").trim().toLowerCase(),
+    highlightWords: extractKeywords(fallbackScript, 6),
+    subtitleStyle: {
+      fontSize: 68,
+      outline: 5,
+      yOffset: 230,
+      fontColor: "white",
+      highlightColor: "yellow",
+      popEnabled: true,
+      popScale: 1.18,
+      popDuration: 0.14,
+      box: true,
+      boxColor: "black@0.5",
+      boxBorder: 10,
+      glow: true,
+    },
+    hookText: fallbackScript.split(/\s+/).slice(0, 8).join(" ").toUpperCase(),
+    keywordPopups: extractKeywords(fallbackScript, 8).slice(0, 2),
+    watermarkText: "",
+  });
+
+  const result = await uploadToYoutube({
+    accessToken,
+    refreshToken: getEnv("YOUTUBE_REFRESH_TOKEN"),
+    videoPath,
+    title,
+    description,
+    tags,
+  });
 
   return result;
 }
@@ -775,6 +868,11 @@ async function run() {
   let voiceFile = "";
   let videoPath = "";
   let fallbackSucceeded = false;
+  let lastScript = "";
+  let lastTitle = "";
+  let lastDescription = "";
+  let lastTags = [];
+  let lastVoicePath = "";
 
   try {
     const hookVariants = Number(getEnv("HOOK_VARIANTS", "5")) || 5;
@@ -936,6 +1034,10 @@ async function run() {
       }
       log(`Using title: ${variantTitle}`);
       log(`Using tags: ${variantTags.join(", ") || "none"}`);
+      lastScript = scriptVariant;
+      lastTitle = variantTitle;
+      lastDescription = variantDescription;
+      lastTags = variantTags;
 
       log("Generating voice");
       const voiceResult = await generateVoice({
@@ -947,6 +1049,7 @@ async function run() {
       voiceFile = voiceResult.file;
 
       const voicePath = path.join(tempDir, voiceFile);
+      lastVoicePath = voicePath;
       const audioDuration = await getMediaDuration(voicePath);
       const desiredVisualDuration =
         maxDurationFinal || minDurationFinal || audioDuration || Number(getEnv("SCRIPT_DURATION_SECONDS", "30")) || 30;
@@ -1241,6 +1344,34 @@ async function run() {
         }
       } catch (fallbackErr) {
         log(`Fallback upload failed: ${fallbackErr.message}`);
+      }
+    }
+    const generatedFallbackEnabled = getEnv("FALLBACK_GENERATED_VIDEO", "true").toLowerCase() !== "false";
+    if (!fallbackSucceeded && generatedFallbackEnabled) {
+      try {
+        log("Attempting generated fallback upload.");
+        const accessToken = await getAccessToken();
+        const fallbackResult = await uploadGeneratedFallback({
+          tempDir,
+          accessToken,
+          script: lastScript,
+          voicePath: lastVoicePath,
+          voice,
+          titleOverride: lastTitle || titleOverride,
+          descriptionOverride: lastDescription || descriptionOverride,
+          tagsOverride: lastTags.length ? lastTags : tagsOverride,
+          extraHashtags,
+          defaultDescription,
+          defaultTags,
+          minDuration: minDurationFinal,
+          maxDuration: maxDurationFinal,
+        });
+        if (fallbackResult?.id) {
+          log(`Generated fallback upload complete: ${fallbackResult.id}`);
+          fallbackSucceeded = true;
+        }
+      } catch (fallbackErr) {
+        log(`Generated fallback failed: ${fallbackErr.message}`);
       }
     }
     if (!fallbackSucceeded) {

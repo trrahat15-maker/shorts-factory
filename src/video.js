@@ -182,6 +182,32 @@ function buildThumbnailFilter(text, style = {}) {
   ];
 }
 
+export async function generateProceduralBaseVideo({ outDir, duration = 20 }) {
+  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 20;
+  const outputFile = `fallback-${Date.now()}-${Math.floor(Math.random() * 1000)}.mp4`;
+  const outputPath = path.join(outDir, outputFile);
+  const palette = ["#0b0f1a", "#101826", "#0f1f2e", "#141b2d", "#1a1224"];
+  const color = palette[Math.floor(Math.random() * palette.length)];
+  const addNoise = Math.random() < 0.6;
+  const filters = [
+    "scale=1080:1920",
+    addNoise ? "noise=alls=6:allf=t+u" : null,
+    "format=yuv420p",
+  ].filter(Boolean);
+
+  return new Promise((resolve, reject) => {
+    ffmpeg()
+      .input(`color=c=${color}:s=1080x1920:d=${safeDuration}`)
+      .inputOptions(["-f", "lavfi"])
+      .videoFilters(filters.join(","))
+      .outputOptions(["-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", "-r", "30"])
+      .output(outputPath)
+      .on("error", (err) => reject(err))
+      .on("end", () => resolve(outputPath))
+      .run();
+  });
+}
+
 function buildSubtitleFilters(subtitles, style = {}) {
   if (!Array.isArray(subtitles) || subtitles.length === 0) return [];
   const fadeIn = 0.2;

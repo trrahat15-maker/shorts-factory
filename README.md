@@ -184,6 +184,7 @@ Optional overrides:
 - `DELETE_BASE_VIDEO_AFTER_UPLOAD` (`true` or `false`, default: `true`, deletes uploaded base file from workspace)
 - `MANUAL_TITLE_FROM_FILENAME` (`true` or `false`, default: `true`, uses filename as title during fallback)
 - `MANUAL_DESCRIPTION_FROM_FILENAME` (`true` or `false`, default: `true`, uses filename as description during fallback)
+- `FALLBACK_GENERATED_VIDEO` (`true` or `false`, default: `true`, creates a procedural background video if everything else fails)
 - `SUBTITLE_MODE` (`word` or `sentence`, default: `word`)
 - `SUBTITLE_HIGHLIGHT` (`true` or `false`, default: `true`)
 - `EXTRA_EFFECTS` (`true` or `false`, default: `true`)
