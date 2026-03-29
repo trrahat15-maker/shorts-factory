@@ -1,0 +1,72 @@
+name: Manual Backup Upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      backup_count:
+        description: "How many backup videos to upload"
+        required: false
+        default: "1"
+      force_public:
+        description: "Force public visibility (true/false)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Secret scan
+        run: node scripts/secretScan.js
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run backup upload
+        run: node scripts/autoUpload.js
+        env:
+          FORCE_UPLOAD: "true"
+          BACKUP_ONLY: "true"
+          BACKUP_UPLOAD_COUNT: ${{ github.event.inputs.backup_count || '1' }}
+          YOUTUBE_PRIVACY_STATUS: ${{ github.event.inputs.force_public == 'true' && 'public' || secrets.YOUTUBE_PRIVACY_STATUS || 'public' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          BASE_VIDEO_URLS: ${{ secrets.BASE_VIDEO_URLS }}
+          DROPBOX_ACCESS_TOKEN: ${{ secrets.DROPBOX_ACCESS_TOKEN }}
+          DROPBOX_FOLDER_PATH: ${{ secrets.DROPBOX_FOLDER_PATH }}
+          DROPBOX_UPLOAD_BACKUPS: ${{ secrets.DROPBOX_UPLOAD_BACKUPS }}
+          VIDEO_TITLE: ${{ secrets.VIDEO_TITLE }}
+          VIDEO_DESCRIPTION: ${{ secrets.VIDEO_DESCRIPTION }}
+          VIDEO_TAGS: ${{ secrets.VIDEO_TAGS }}
+          HASHTAGS: ${{ secrets.HASHTAGS }}
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-backup-artifacts
+          if-no-files-found: warn
+          path: |
+            artifacts/*.mp4
+            data/learning.json

@@ -259,6 +259,18 @@ Optional analysis secrets (for manual run):
 - `CHANNEL_ID`
 - `ANALYSIS_VIDEO_COUNT`
 
+## Manual Run Buttons (Easy Mode)
+
+You now have **two simple GitHub Action buttons**:
+
+1. **Manual AI Upload**  
+   Generates a fresh AI video immediately.
+
+2. **Manual Backup Upload**  
+   Uploads backup videos from Dropbox or `BASE_VIDEO_URLS`.
+
+Go to **GitHub → Actions**, select the workflow you want, then click **Run workflow**.
+
 ### 3) Enable the workflow
 
 The workflow file is:
