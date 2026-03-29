@@ -1442,17 +1442,36 @@ async function run() {
       try {
         log("Attempting manual base-video fallback upload.");
         const accessToken = await getAccessToken();
-        const fallbackResult = await uploadManualBaseVideo({
-          baseDir,
-          tempDir,
-          accessToken,
-          titleOverride,
-          descriptionOverride,
-          tagsOverride,
-          extraHashtags,
-          defaultDescription,
-          defaultTags,
-        });
+        const localVideos = await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
+        const downloadedVideos = downloadedBase.map((file) => path.basename(file));
+        const candidates = [
+          ...downloadedVideos.map((file) => ({
+            path: path.join(tempBaseDir, file),
+            name: file,
+            deletable: false,
+          })),
+          ...localVideos.map((file) => ({
+            path: path.join(baseDir, file),
+            name: file,
+            deletable: getEnv("DELETE_BASE_VIDEO_AFTER_UPLOAD", "true").toLowerCase() !== "false",
+          })),
+        ];
+        const ordered = await sortByNewest(candidates);
+        const pick = ordered[0];
+        const fallbackResult = pick
+          ? await uploadManualBaseVideoPath({
+              filePath: pick.path,
+              fileName: pick.name,
+              deleteAfter: pick.deletable,
+              accessToken,
+              titleOverride,
+              descriptionOverride,
+              tagsOverride,
+              extraHashtags,
+              defaultDescription,
+              defaultTags,
+            })
+          : null;
         if (fallbackResult?.id) {
           log(`Fallback upload complete: ${fallbackResult.id}`);
           fallbackSucceeded = true;
