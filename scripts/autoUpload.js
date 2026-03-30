@@ -1831,6 +1831,7 @@ async function run() {
         }
       }
     }
+    }
   } catch (err) {
     log(`Video generation failed: ${err.message}`);
     const fallbackEnabled = getEnv("FALLBACK_BASE_UPLOAD", "true").toLowerCase() !== "false";
