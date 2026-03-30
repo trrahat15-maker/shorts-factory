@@ -5,8 +5,7 @@ const log = (message) => console.log(`[elevenlabs-test] ${message}`);
 function parseKeys() {
   const primary = (process.env.ELEVENLABS_API_KEY || "").trim();
   const extras = (process.env.ELEVENLABS_API_KEYS || "")
-    .split(/[,
-;]/)
+    .split(/[,\n;]/)
     .map((k) => k.trim())
     .filter(Boolean);
   return [primary, ...extras].filter(Boolean);
