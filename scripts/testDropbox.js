@@ -1,5 +1,3 @@
-import "dotenv/config";
-
 const log = (message) => console.log(`[dropbox-test] ${message}`);
 
 function getEnv(name, fallback = "") {
