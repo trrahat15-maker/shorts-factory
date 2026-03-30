@@ -239,6 +239,11 @@ async function uploadFileToDropbox({ token, folderPath, filePath, nameBase, exte
   const ext = extension || path.extname(filePath) || ".mp4";
   const fileName = `${sanitizeFileName(nameBase)}-${Date.now()}${ext}`;
   const dropboxPath = `${folderPath}/${fileName}`.replace(/\/+/g, "/");
+  return uploadFileToDropboxPath({ token, dropboxPath, filePath });
+}
+
+async function uploadFileToDropboxPath({ token, dropboxPath, filePath }) {
+  if (!token || !dropboxPath || !filePath) return null;
   const contents = await fs.readFile(filePath);
   const res = await fetch("https://content.dropboxapi.com/2/files/upload", {
     method: "POST",
@@ -259,6 +264,60 @@ async function uploadFileToDropbox({ token, folderPath, filePath, nameBase, exte
     throw new Error(`Dropbox upload failed ${res.status}: ${text}`);
   }
   return dropboxPath;
+}
+
+function buildBackupMeta({ title, description, tags, hook, topic }) {
+  return {
+    title: title || "",
+    description: description || "",
+    tags: Array.isArray(tags) ? tags : [],
+    hook: hook || "",
+    topic: topic || "",
+    createdAt: new Date().toISOString(),
+  };
+}
+
+async function uploadBackupToDropbox({
+  token,
+  folderPath,
+  videoPath,
+  meta,
+  nameBase,
+}) {
+  if (!token || !folderPath || !videoPath) return null;
+  const ext = path.extname(videoPath) || ".mp4";
+  const stamp = Date.now();
+  const base = sanitizeFileName(nameBase || meta?.title || "backup");
+  const videoName = `${base}-${stamp}${ext}`;
+  const metaName = `${base}-${stamp}.json`;
+  const videoDropboxPath = `${folderPath}/${videoName}`.replace(/\/+/g, "/");
+  const metaDropboxPath = `${folderPath}/${metaName}`.replace(/\/+/g, "/");
+
+  await uploadFileToDropboxPath({ token, dropboxPath: videoDropboxPath, filePath: videoPath });
+
+  const tempMetaPath = path.join(os.tmpdir(), metaName);
+  await fs.writeFile(tempMetaPath, JSON.stringify(meta || {}, null, 2), "utf8");
+  await uploadFileToDropboxPath({ token, dropboxPath: metaDropboxPath, filePath: tempMetaPath });
+  try {
+    await fs.rm(tempMetaPath, { force: true });
+  } catch {
+    // ignore
+  }
+  return { videoDropboxPath, metaDropboxPath };
+}
+
+async function downloadDropboxMetadata({ token, metaPath }) {
+  if (!token || !metaPath) return null;
+  const link = await getDropboxTempLink({ token, filePath: metaPath });
+  if (!link) return null;
+  const response = await fetch(link);
+  if (!response.ok) return null;
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 async function saveLogFile({ logsDir, dropboxToken, dropboxFolder, label }) {
@@ -599,6 +658,9 @@ async function uploadManualBaseVideoPath({
   titleOverride,
   descriptionOverride,
   tagsOverride,
+  metaTitle,
+  metaDescription,
+  metaTags,
   extraHashtags,
   defaultDescription,
   defaultTags,
@@ -607,9 +669,9 @@ async function uploadManualBaseVideoPath({
   const useTitleFromName = getEnv("MANUAL_TITLE_FROM_FILENAME", "true").toLowerCase() !== "false";
   const useDescFromName = getEnv("MANUAL_DESCRIPTION_FROM_FILENAME", "true").toLowerCase() !== "false";
 
-  let title = titleOverride || (useTitleFromName ? fileLabel : "");
-  let description = descriptionOverride || (useDescFromName ? fileLabel : defaultDescription);
-  let tags = tagsOverride?.length ? tagsOverride : defaultTags;
+  let title = metaTitle || titleOverride || (useTitleFromName ? fileLabel : "");
+  let description = metaDescription || descriptionOverride || (useDescFromName ? fileLabel : defaultDescription);
+  let tags = metaTags?.length ? metaTags : tagsOverride?.length ? tagsOverride : defaultTags;
   if (extraHashtags?.length) {
     description = withHashtags(description, extraHashtags);
   }
@@ -1097,11 +1159,15 @@ async function run() {
             destDir: tempBaseDir,
             fallbackName: item.name,
           });
+          const metaPath = item.path.replace(/\.[^.]+$/, ".json");
+          const meta = await downloadDropboxMetadata({ token: dropboxToken, metaPath });
           dropboxDownloads.push({
             path: pathDownloaded,
             name: item.name,
             time: item.time,
             originPath: item.path,
+            metaPath,
+            meta,
           });
         } catch (err) {
           log(`Dropbox download failed for ${item.name}: ${err.message}`);
@@ -1146,6 +1212,9 @@ async function run() {
         titleOverride: getEnv("VIDEO_TITLE", "").trim(),
         descriptionOverride: getEnv("VIDEO_DESCRIPTION", "").trim(),
         tagsOverride: parseCsv(getEnv("VIDEO_TAGS", "")),
+        metaTitle: item.meta?.title,
+        metaDescription: item.meta?.description,
+        metaTags: item.meta?.tags,
         extraHashtags: parseCsv(getEnv("HASHTAGS", "#shorts,#motivation,#success")),
         defaultDescription:
           "Daily motivational shorts.\n\nSubscribe for more success mindset content.\n\n#motivation #success #discipline",
@@ -1160,6 +1229,12 @@ async function run() {
           // eslint-disable-next-line no-await-in-loop
           await moveDropboxFile({ token: dropboxToken, fromPath: item.originPath, toPath: targetPath });
           log(`Moved Dropbox backup to used folder: ${targetPath}`);
+          if (item.metaPath) {
+            const metaTarget = `${usedFolder}/${path.basename(item.metaPath)}`;
+            // eslint-disable-next-line no-await-in-loop
+            await moveDropboxFile({ token: dropboxToken, fromPath: item.metaPath, toPath: metaTarget });
+            log(`Moved Dropbox metadata to used folder: ${metaTarget}`);
+          }
         } catch (err) {
           log(`Dropbox move failed: ${err.message}`);
         }
@@ -1742,14 +1817,22 @@ async function run() {
       const uploadBackup = getEnv("DROPBOX_UPLOAD_BACKUPS", "false").toLowerCase() === "true";
       if ((uploadBackup || isGenerateBackup) && dropboxToken && dropboxFolders.backup && videoPath) {
         try {
-          const nameBase = variantDescription || variantTitle;
-          const dropboxPath = await uploadFileToDropbox({
+          const nameBase = variantTitle || hookTextRaw || "backup";
+          const meta = buildBackupMeta({
+            title: variantTitle,
+            description: variantDescription,
+            tags: variantTags,
+            hook: variant.hook,
+            topic: runTopic,
+          });
+          const dropboxInfo = await uploadBackupToDropbox({
             token: dropboxToken,
             folderPath: dropboxFolders.backup,
-            filePath: videoPath,
+            videoPath,
+            meta,
             nameBase,
           });
-          log(`Dropbox backup saved: ${dropboxPath}`);
+          log(`Dropbox backup saved: ${dropboxInfo?.videoDropboxPath || "unknown"}`);
         } catch (err) {
           log(`Dropbox backup upload failed: ${err.message}`);
         }
@@ -1853,7 +1936,16 @@ async function run() {
                 destDir: tempBaseDir,
                 fallbackName: first.name,
               });
-              dropboxPick = { path: downloaded, name: first.name, time: first.time, originPath: first.path };
+              const metaPath = first.path.replace(/\.[^.]+$/, ".json");
+              const meta = await downloadDropboxMetadata({ token: dropboxToken, metaPath });
+              dropboxPick = {
+                path: downloaded,
+                name: first.name,
+                time: first.time,
+                originPath: first.path,
+                metaPath,
+                meta,
+              };
             }
           } catch (err) {
             log(`Dropbox fallback failed: ${err.message}`);
@@ -1873,6 +1965,8 @@ async function run() {
                   deletable: false,
                   time: dropboxPick.time,
                   originPath: dropboxPick.originPath,
+                  metaPath: dropboxPick.metaPath,
+                  meta: dropboxPick.meta,
                 },
               ]
             : []),
@@ -1893,6 +1987,9 @@ async function run() {
               titleOverride,
               descriptionOverride,
               tagsOverride,
+              metaTitle: pick.meta?.title,
+              metaDescription: pick.meta?.description,
+              metaTags: pick.meta?.tags,
               extraHashtags,
               defaultDescription,
               defaultTags,
@@ -1908,6 +2005,11 @@ async function run() {
               await ensureDropboxFolder({ token: dropboxToken, path: usedFolder });
               await moveDropboxFile({ token: dropboxToken, fromPath: pick.originPath, toPath: targetPath });
               log(`Moved Dropbox backup to used folder: ${targetPath}`);
+              if (pick.metaPath) {
+                const metaTarget = `${usedFolder}/${path.basename(pick.metaPath)}`;
+                await moveDropboxFile({ token: dropboxToken, fromPath: pick.metaPath, toPath: metaTarget });
+                log(`Moved Dropbox metadata to used folder: ${metaTarget}`);
+              }
             } catch (err) {
               log(`Dropbox move failed: ${err.message}`);
             }

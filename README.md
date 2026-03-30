@@ -141,6 +141,8 @@ If you set `DROPBOX_SYSTEM_ROOT` (recommended), the system will manage these fol
 
 When a backup is used, it is moved to `used_videos`.
 
+Backup uploads now include a small `.json` metadata file next to each video. When uploading a backup, the system reads that metadata to set the YouTube title/description/tags. If the metadata is missing, it falls back to the filename.
+
 ### 2) Add required GitHub Secrets
 
 In your GitHub repo: **Settings -> Secrets and variables -> Actions -> New repository secret**
