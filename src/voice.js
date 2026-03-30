@@ -28,8 +28,14 @@ export async function generateVoice({ text, voice = "alloy", elevenLabsApiKey, o
   const outPath = path.join(outDir, filename);
   const allowFreeTts = process.env.FREE_TTS?.toLowerCase() !== "false";
 
-  const apiKey = (elevenLabsApiKey || "").replace(/\s+/g, "");
-  if (apiKey) {
+  const envKeys = (process.env.ELEVENLABS_API_KEYS || "")
+    .split(/[,\n;]/)
+    .map((k) => k.trim())
+    .filter(Boolean);
+  const initialKey = (elevenLabsApiKey || "").replace(/\s+/g, "");
+  const keysToTry = [initialKey, ...envKeys].filter(Boolean);
+
+  for (const apiKey of keysToTry) {
     try {
       const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}`;
       const res = await fetch(url, {
@@ -50,8 +56,14 @@ export async function generateVoice({ text, voice = "alloy", elevenLabsApiKey, o
       await fs.writeFile(outPath, Buffer.from(buffer));
       return { file: filename, url: `/uploads/generated/${filename}` };
     } catch (err) {
-      if (!allowFreeTts) throw err;
-      return generateVoiceWithEspeak({ text, outDir });
+      // Try next key on quota/401/429/voice errors.
+      const message = String(err?.message || "");
+      const shouldRotate =
+        /quota|credits|invalid|unauthorized|401|429|voice_not_found|missing_permissions/i.test(message);
+      if (!shouldRotate) {
+        if (!allowFreeTts) throw err;
+        return generateVoiceWithEspeak({ text, outDir });
+      }
     }
   }
 

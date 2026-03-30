@@ -227,6 +227,7 @@ Optional overrides:
 - `SCENE_ASSET_COUNT` (default: `3`, downloads multiple visuals per scene)
 - `IMAGE_FALLBACK_COUNT` (default: `4`, images per scene when no video)
 - `ELEVENLABS_VOICE`
+- `ELEVENLABS_API_KEYS` (optional comma-separated keys to rotate if one runs out)
 - `FREE_TTS` (`true` or `false`, default: `true`, uses `espeak` when ElevenLabs fails or is missing)
 - `FREE_TTS_VOICE` (default: `en`)
 - `FREE_TTS_RATE` (default: `170`)
