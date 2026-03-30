@@ -43,6 +43,7 @@ jobs:
       - name: Run backup upload
         run: node scripts/autoUpload.js
         env:
+          COMMAND: UPLOAD_NOW
           FORCE_UPLOAD: "true"
           BACKUP_ONLY: "true"
           BACKUP_UPLOAD_COUNT: ${{ github.event.inputs.backup_count || '1' }}
@@ -55,7 +56,10 @@ jobs:
           BASE_VIDEO_URLS: ${{ secrets.BASE_VIDEO_URLS }}
           DROPBOX_ACCESS_TOKEN: ${{ secrets.DROPBOX_ACCESS_TOKEN }}
           DROPBOX_FOLDER_PATH: ${{ secrets.DROPBOX_FOLDER_PATH }}
+          DROPBOX_SYSTEM_ROOT: ${{ secrets.DROPBOX_SYSTEM_ROOT }}
+          DROPBOX_USE_SYSTEM_FOLDERS: ${{ secrets.DROPBOX_USE_SYSTEM_FOLDERS }}
           DROPBOX_UPLOAD_BACKUPS: ${{ secrets.DROPBOX_UPLOAD_BACKUPS }}
+          DROPBOX_SAVE_GENERATED: ${{ secrets.DROPBOX_SAVE_GENERATED }}
           VIDEO_TITLE: ${{ secrets.VIDEO_TITLE }}
           VIDEO_DESCRIPTION: ${{ secrets.VIDEO_DESCRIPTION }}
           VIDEO_TAGS: ${{ secrets.VIDEO_TAGS }}

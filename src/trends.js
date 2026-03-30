@@ -84,6 +84,36 @@ export async function fetchYoutubeTrends({ region = "US", accessToken, maxTopics
   return unique.slice(0, maxTopics);
 }
 
+export async function fetchTrendingShorts({
+  accessToken,
+  region = "US",
+  query = "motivation",
+  maxTopics = 15,
+  publishedWithinDays = 7,
+} = {}) {
+  if (!accessToken) return [];
+  const youtube = google.youtube("v3");
+  const publishedAfter = new Date(Date.now() - publishedWithinDays * 86400000).toISOString();
+  const response = await youtube.search.list({
+    part: ["snippet"],
+    q: `${query} shorts`,
+    type: ["video"],
+    order: "viewCount",
+    regionCode: region,
+    publishedAfter,
+    maxResults: 25,
+    access_token: accessToken,
+  });
+  const items = response?.data?.items || [];
+  const topics = [];
+  items.forEach((item) => {
+    const title = item?.snippet?.title;
+    if (title) topics.push(title);
+  });
+  const unique = Array.from(new Set(topics.map(normalizeTopic))).filter(Boolean);
+  return unique.slice(0, maxTopics);
+}
+
 export function buildRankedTopics({ trends = [], preferred = [] } = {}) {
   return rankTopics(trends, preferred);
 }

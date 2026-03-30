@@ -14,9 +14,15 @@ import {
 } from "../src/video.js";
 import { postTopLevelComment, replyToTopComment, uploadThumbnail, uploadToYoutube } from "../src/youtube.js";
 import { extractKeywords, fetchStockScenes, splitScriptIntoParts, loadCachedMedia } from "../src/stock.js";
-import { buildRankedTopics, fetchGoogleTrends, fetchYoutubeTrends } from "../src/trends.js";
+import { buildRankedTopics, fetchGoogleTrends, fetchTrendingShorts, fetchYoutubeTrends } from "../src/trends.js";
+import { fetchCompetitorInsights } from "../src/competitors.js";
 
-const log = (message) => console.log(`[auto] ${message}`);
+const logLines = [];
+const log = (message) => {
+  const line = `[auto] ${message}`;
+  console.log(line);
+  logLines.push(line);
+};
 
 const REQUIRED_ENV = [
   "OPENAI_API_KEY",
@@ -105,6 +111,17 @@ function sanitizeFileName(input, maxLength = 70) {
   return cropped || `backup-${Date.now()}`;
 }
 
+function normalizeDropboxPath(input) {
+  if (!input) return "";
+  let pathValue = input.trim();
+  if (!pathValue.startsWith("/")) pathValue = `/${pathValue}`;
+  pathValue = pathValue.replace(/\/+/g, "/");
+  if (pathValue.length > 1 && pathValue.endsWith("/")) {
+    pathValue = pathValue.slice(0, -1);
+  }
+  return pathValue;
+}
+
 async function dropboxFetch(url, token, body) {
   const res = await fetch(url, {
     method: "POST",
@@ -119,6 +136,51 @@ async function dropboxFetch(url, token, body) {
     throw new Error(`Dropbox API error ${res.status}: ${text}`);
   }
   return res.json();
+}
+
+async function ensureDropboxFolder({ token, path: folderPath }) {
+  if (!token || !folderPath) return null;
+  const normalized = normalizeDropboxPath(folderPath);
+  try {
+    return await dropboxFetch("https://api.dropboxapi.com/2/files/create_folder_v2", token, {
+      path: normalized,
+      autorename: false,
+    });
+  } catch (err) {
+    if (String(err.message || "").includes("path/conflict/folder")) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+async function moveDropboxFile({ token, fromPath, toPath }) {
+  if (!token || !fromPath || !toPath) return null;
+  return dropboxFetch("https://api.dropboxapi.com/2/files/move_v2", token, {
+    from_path: fromPath,
+    to_path: toPath,
+    autorename: true,
+  });
+}
+
+function getDropboxFolders() {
+  const root = normalizeDropboxPath(getEnv("DROPBOX_SYSTEM_ROOT", "").trim());
+  const useSystem = getEnv("DROPBOX_USE_SYSTEM_FOLDERS", "false").toLowerCase() === "true" || Boolean(root);
+  if (useSystem) {
+    const base = root || "/youtube_ai_system";
+    return {
+      backup: `${base}/backup_videos`,
+      generated: `${base}/generated_videos`,
+      used: `${base}/used_videos`,
+      logs: `${base}/logs`,
+    };
+  }
+  return {
+    backup: normalizeDropboxPath(getEnv("DROPBOX_FOLDER_PATH", "").trim()),
+    generated: "",
+    used: normalizeDropboxPath(getEnv("DROPBOX_USED_FOLDER_PATH", "").trim()),
+    logs: "",
+  };
 }
 
 async function listDropboxVideos({ token, folderPath }) {
@@ -172,9 +234,10 @@ async function downloadDropboxFile({ token, filePath, destDir, fallbackName }) {
   return destPath;
 }
 
-async function uploadFileToDropbox({ token, folderPath, filePath, nameBase }) {
+async function uploadFileToDropbox({ token, folderPath, filePath, nameBase, extension }) {
   if (!token || !folderPath || !filePath) return null;
-  const fileName = `${sanitizeFileName(nameBase)}-${Date.now()}.mp4`;
+  const ext = extension || path.extname(filePath) || ".mp4";
+  const fileName = `${sanitizeFileName(nameBase)}-${Date.now()}${ext}`;
   const dropboxPath = `${folderPath}/${fileName}`.replace(/\/+/g, "/");
   const contents = await fs.readFile(filePath);
   const res = await fetch("https://content.dropboxapi.com/2/files/upload", {
@@ -196,6 +259,54 @@ async function uploadFileToDropbox({ token, folderPath, filePath, nameBase }) {
     throw new Error(`Dropbox upload failed ${res.status}: ${text}`);
   }
   return dropboxPath;
+}
+
+async function saveLogFile({ logsDir, dropboxToken, dropboxFolder, label }) {
+  if (!logLines.length) return null;
+  await fs.mkdir(logsDir, { recursive: true });
+  const stamp = label || new Date().toISOString().replace(/[:.]/g, "-");
+  const logPath = path.join(logsDir, `auto-${stamp}.log`);
+  await fs.writeFile(logPath, logLines.join("\n"), "utf8");
+  if (dropboxToken && dropboxFolder) {
+    try {
+      await uploadFileToDropbox({
+        token: dropboxToken,
+        folderPath: dropboxFolder,
+        filePath: logPath,
+        nameBase: `auto-${stamp}`,
+        extension: ".log",
+      });
+    } catch (err) {
+      log(`Dropbox log upload failed: ${err.message}`);
+    }
+  }
+  return logPath;
+}
+
+async function saveGeneratedCopy({ videoPath, title, dropboxToken, dropboxFolder }) {
+  if (!videoPath) return null;
+  const generatedDir = path.join(process.cwd(), "generated_videos");
+  await fs.mkdir(generatedDir, { recursive: true });
+  const localPath = path.join(generatedDir, path.basename(videoPath));
+  try {
+    await fs.copyFile(videoPath, localPath);
+  } catch (err) {
+    log(`Generated copy failed: ${err.message}`);
+  }
+  if (dropboxToken && dropboxFolder) {
+    try {
+      await uploadFileToDropbox({
+        token: dropboxToken,
+        folderPath: dropboxFolder,
+        filePath: videoPath,
+        nameBase: title || "generated",
+        extension: ".mp4",
+      });
+    } catch (err) {
+      log(`Dropbox generated upload failed: ${err.message}`);
+    }
+  }
+  return localPath;
 }
 
 function parseUrlList(raw) {
@@ -856,14 +967,41 @@ async function cleanupTemp(tempDir) {
 async function run() {
   requireEnv();
 
+  const command = getEnv("COMMAND", "RUN_AUTO").trim().toUpperCase();
   const forceUpload = getEnv("FORCE_UPLOAD", "false").toLowerCase() === "true";
-  if (!forceUpload && shouldSkipRun()) {
+  const logsDir = path.join(process.cwd(), "logs");
+  const logLabel = new Date().toISOString().replace(/[:.]/g, "-");
+
+  if (command === "CHECK_LOGS") {
+    try {
+      const files = await fs.readdir(logsDir);
+      const logs = files.filter((f) => f.endsWith(".log")).sort();
+      if (logs.length) {
+        const last = logs[logs.length - 1];
+        const content = await fs.readFile(path.join(logsDir, last), "utf8");
+        console.log(content);
+      } else {
+        log("No local logs found.");
+      }
+    } catch (err) {
+      log(`Log check failed: ${err.message}`);
+    }
+    return;
+  }
+
+  if (!forceUpload && command !== "UPLOAD_NOW" && shouldSkipRun()) {
     log("Skipping upload this run based on UPLOAD_CHANCE.");
+    await saveLogFile({
+      logsDir,
+      dropboxToken: getEnv("DROPBOX_ACCESS_TOKEN", "").trim(),
+      dropboxFolder: getDropboxFolders().logs,
+      label: logLabel,
+    });
     return;
   }
 
   const smartSchedule = getEnv("SMART_SCHEDULE", "false").toLowerCase() === "true";
-  if (smartSchedule && !forceUpload) {
+  if (smartSchedule && !forceUpload && command !== "UPLOAD_NOW") {
     const timeZone = getEnv("SCHEDULE_TZ", "UTC");
     const leadMinutes = Number(getEnv("SCHEDULE_LEAD_MINUTES", "15")) || 15;
     const windowMinutes = Number(getEnv("SCHEDULE_WINDOW_MINUTES", "10")) || 10;
@@ -888,6 +1026,12 @@ async function run() {
         log(`Best publish hour (local ${timeZone}): ${bestHour}:00`);
         if (!isWithinWindow(nowMinutes, runStart, runEnd)) {
           log("Not within the scheduled upload window. Exiting.");
+          await saveLogFile({
+            logsDir,
+            dropboxToken: getEnv("DROPBOX_ACCESS_TOKEN", "").trim(),
+            dropboxFolder: getDropboxFolders().logs,
+            label: logLabel,
+          });
           return;
         }
       }
@@ -909,10 +1053,22 @@ async function run() {
   const baseVideoUrls = parseUrlList(getEnv("BASE_VIDEO_URLS"));
   const musicUrls = parseUrlList(getEnv("MUSIC_URLS"));
   const dropboxToken = getEnv("DROPBOX_ACCESS_TOKEN", "").trim();
-  const dropboxFolder = getEnv("DROPBOX_FOLDER_PATH", "").trim();
+  const dropboxFolders = getDropboxFolders();
+  const dropboxFolder = dropboxFolders.backup;
 
   const downloadedBase = await downloadMediaList(baseVideoUrls, tempBaseDir, "base-video");
   const downloadedMusic = await downloadMediaList(musicUrls, tempMusicDir, "music");
+
+  if (dropboxToken && dropboxFolders.backup) {
+    try {
+      await ensureDropboxFolder({ token: dropboxToken, path: dropboxFolders.backup });
+      if (dropboxFolders.generated) await ensureDropboxFolder({ token: dropboxToken, path: dropboxFolders.generated });
+      if (dropboxFolders.used) await ensureDropboxFolder({ token: dropboxToken, path: dropboxFolders.used });
+      if (dropboxFolders.logs) await ensureDropboxFolder({ token: dropboxToken, path: dropboxFolders.logs });
+    } catch (err) {
+      log(`Dropbox folder setup failed: ${err.message}`);
+    }
+  }
 
   const backupOnly = getEnv("BACKUP_ONLY", "false").toLowerCase() === "true";
   if (backupOnly) {
@@ -941,7 +1097,12 @@ async function run() {
             destDir: tempBaseDir,
             fallbackName: item.name,
           });
-          dropboxDownloads.push({ path: pathDownloaded, name: item.name, time: item.time });
+          dropboxDownloads.push({
+            path: pathDownloaded,
+            name: item.name,
+            time: item.time,
+            originPath: item.path,
+          });
         } catch (err) {
           log(`Dropbox download failed for ${item.name}: ${err.message}`);
         }
@@ -958,6 +1119,7 @@ async function run() {
         name: file.name,
         deletable: false,
         time: file.time,
+        originPath: file.originPath,
       })),
       ...localVideos.map((file) => ({
         path: path.join(baseDir, file),
@@ -976,7 +1138,7 @@ async function run() {
     for (let i = 0; i < count; i += 1) {
       const item = ordered[i];
       // eslint-disable-next-line no-await-in-loop
-      await uploadManualBaseVideoPath({
+      const result = await uploadManualBaseVideoPath({
         filePath: item.path,
         fileName: item.name,
         deleteAfter: item.deletable,
@@ -989,7 +1151,26 @@ async function run() {
           "Daily motivational shorts.\n\nSubscribe for more success mindset content.\n\n#motivation #success #discipline",
         defaultTags: ["motivation", "success", "discipline", "shorts"],
       });
+      if (result?.id && item.originPath && dropboxToken && (dropboxFolders.used || dropboxFolders.backup)) {
+        const usedFolder = dropboxFolders.used || `${dropboxFolders.backup}/used_videos`;
+        const targetPath = `${usedFolder}/${path.basename(item.originPath)}`;
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await ensureDropboxFolder({ token: dropboxToken, path: usedFolder });
+          // eslint-disable-next-line no-await-in-loop
+          await moveDropboxFile({ token: dropboxToken, fromPath: item.originPath, toPath: targetPath });
+          log(`Moved Dropbox backup to used folder: ${targetPath}`);
+        } catch (err) {
+          log(`Dropbox move failed: ${err.message}`);
+        }
+      }
     }
+    await saveLogFile({
+      logsDir,
+      dropboxToken,
+      dropboxFolder: dropboxFolders.logs,
+      label: logLabel,
+    });
     await cleanupTemp(tempDir);
     return;
   }
@@ -1040,15 +1221,44 @@ async function run() {
   const trendRegion = getEnv("TRENDS_REGION", "US");
   const trendLanguage = getEnv("TRENDS_LANGUAGE", "en-US");
   const trendMax = Number(getEnv("TREND_MAX_TOPICS", "15")) || 15;
+  const enableCompetitors = getEnv("ENABLE_COMPETITOR_ANALYSIS", "true").toLowerCase() !== "false";
+  const competitorQuery = getEnv("COMPETITOR_QUERY", "").trim();
+  const competitorChannels = Number(getEnv("COMPETITOR_CHANNELS", "5")) || 5;
+  const competitorVideos = Number(getEnv("COMPETITOR_VIDEOS_PER_CHANNEL", "5")) || 5;
+  const enableShortsTrends = getEnv("ENABLE_TREND_SHORTS", "true").toLowerCase() !== "false";
+  const shortsQuery = getEnv("TREND_SHORTS_QUERY", "").trim();
+  const shortsDays = Number(getEnv("TREND_SHORTS_DAYS", "7")) || 7;
   const learningPath = path.join(process.cwd(), "data", "learning.json");
   const learning = await loadLearningData(learningPath);
   let trendTopics = [];
+  let shortsTopics = [];
+  let competitorTopics = [];
   if (enableTrends) {
     try {
       const accessToken = await getAccessToken();
       const youtubeTrends = await fetchYoutubeTrends({ region: trendRegion, accessToken, maxTopics: trendMax });
       const googleTrends = await fetchGoogleTrends({ region: trendRegion, hl: trendLanguage, maxTopics: trendMax });
       trendTopics = buildRankedTopics({ trends: [...youtubeTrends, ...googleTrends], preferred: topics });
+      if (enableShortsTrends) {
+        const query = shortsQuery || topics[0] || "motivation";
+        shortsTopics = await fetchTrendingShorts({
+          accessToken,
+          region: trendRegion,
+          query,
+          maxTopics: trendMax,
+          publishedWithinDays: shortsDays,
+        });
+      }
+      if (enableCompetitors) {
+        const query = competitorQuery || topics[0] || "motivation";
+        const competitor = await fetchCompetitorInsights({
+          accessToken,
+          query,
+          maxChannels: competitorChannels,
+          maxVideosPerChannel: competitorVideos,
+        });
+        competitorTopics = competitor?.topics || [];
+      }
     } catch (err) {
       log(`Trend fetch failed: ${err.message}`);
     }
@@ -1056,7 +1266,9 @@ async function run() {
   const learnedTopics = Object.entries(learning?.topics || {})
     .sort((a, b) => b[1] - a[1])
     .map(([topic]) => topic);
-  const mergedTopics = Array.from(new Set([...(trendTopics || []), ...learnedTopics, ...topics]))
+  const mergedTopics = Array.from(
+    new Set([...(trendTopics || []), ...shortsTopics, ...competitorTopics, ...learnedTopics, ...topics])
+  )
     .filter((topic) => {
       if (!blockedTopics.length) return true;
       const lower = String(topic).toLowerCase();
@@ -1117,6 +1329,13 @@ async function run() {
   const titleVariants = Number(getEnv("TITLE_VARIANTS", "3")) || 3;
   const extraHashtags = parseCsv(getEnv("HASHTAGS", "#shorts,#motivation,#success"));
 
+  const isGenerateBackup = command === "GENERATE_BACKUP";
+  const uploadToYoutubeEnabled = command !== "GENERATE_BACKUP";
+  const backupGenerateCount = Number(getEnv("BACKUP_GENERATE_COUNT", "5")) || 5;
+  const generationRuns = isGenerateBackup ? Math.min(10, Math.max(1, backupGenerateCount)) : 1;
+  const saveGenerated = getEnv("SAVE_GENERATED_VIDEOS", "true").toLowerCase() !== "false";
+  const dropboxSaveGenerated = getEnv("DROPBOX_SAVE_GENERATED", "true").toLowerCase() !== "false";
+
   let voiceFile = "";
   let videoPath = "";
   let fallbackSucceeded = false;
@@ -1128,80 +1347,10 @@ async function run() {
 
   try {
     const hookVariants = Number(getEnv("HOOK_VARIANTS", "5")) || 5;
-    const abTest = getEnv("AB_TEST", "false").toLowerCase() === "true";
-    const variantCount = abTest ? 2 : 1;
-    let hooks = [];
-    if (hookVariants > 0) {
-      try {
-        log("Generating hooks");
-        hooks = await generateHooks({
-          topic: dailyTopic,
-          apiKey: getEnv("OPENAI_API_KEY").trim(),
-          baseUrl: openaiBaseUrl,
-          model: openaiModel,
-          count: hookVariants,
-        });
-      } catch (err) {
-        log(`Hook generation failed: ${err.message}`);
-      }
-    }
-    const hookChoices = pickTopHooks(hooks, variantCount);
-    const primaryHook = hookChoices[0] || "";
-
-    log("Generating script");
+    const maxAttemptsPerModel = Number(getEnv("OPENAI_MODEL_ATTEMPTS", "2")) || 2;
     const modelsToTry = Array.from(
       new Set([openaiModel, ...modelList, openaiFallbackModel].filter(Boolean))
     );
-    let script = "";
-    let lastError = null;
-    const maxAttemptsPerModel = Number(getEnv("OPENAI_MODEL_ATTEMPTS", "2")) || 2;
-    let usedModel = openaiModel;
-
-    for (const model of modelsToTry) {
-      for (let attempt = 1; attempt <= maxAttemptsPerModel; attempt += 1) {
-        try {
-          log(`Script attempt ${attempt} using model: ${model}`);
-          const finalPrompt = [
-            `${prompt}\n\nLanguage: ${language}.`,
-            "Include a clear call-to-action in the last sentence.",
-            primaryHook ? `Start with this exact hook: "${primaryHook}".` : "",
-            topicLine,
-          ]
-            .filter(Boolean)
-            .join("\n");
-
-          script = await generateScript({
-            prompt: finalPrompt,
-            apiKey: getEnv("OPENAI_API_KEY").trim(),
-            baseUrl: openaiBaseUrl,
-            model,
-          });
-          if (script) {
-            usedModel = model;
-            break;
-          }
-        } catch (err) {
-          lastError = err;
-          const message = getErrorMessage(err);
-          log(`Script attempt failed: ${message}`);
-          if (isRateLimitError(err)) {
-            const delaySeconds = retryDelays[Math.min(attempt - 1, retryDelays.length - 1)] || 30;
-            const jitterMs = Math.floor(Math.random() * 5000);
-            log(`Rate limit hit. Waiting ${delaySeconds}s before retry...`);
-            await sleep(delaySeconds * 1000 + jitterMs);
-            if (modelsToTry.length > 1 && message.toLowerCase().includes("rate-limited")) {
-              log("Rate limit persists. Rotating to next model.");
-              break;
-            }
-          }
-        }
-      }
-      if (script) break;
-    }
-
-    if (!script && lastError) {
-      throw lastError;
-    }
 
     const ctaList = parseCsv(
       getEnv(
@@ -1226,19 +1375,94 @@ async function run() {
       return output;
     };
 
-    const scriptsToRender = [];
-    const hookLabels = ["A", "B", "C"];
-    const secondaryHook = hookChoices[1] || "";
-    const baseScript = buildScriptVariant(script, primaryHook);
-    scriptsToRender.push({ label: hookLabels[0], hook: primaryHook, script: baseScript });
-    if (abTest) {
-      const altHook = secondaryHook || primaryHook;
-      const altScript = buildScriptVariant(script, altHook);
-      scriptsToRender.push({ label: hookLabels[1], hook: altHook, script: altScript });
-    }
+    const accessToken = uploadToYoutubeEnabled ? await getAccessToken() : null;
+    for (let runIndex = 0; runIndex < generationRuns; runIndex += 1) {
+      const runTopic = isGenerateBackup ? pickRandom(mergedTopics, dailyTopic) : dailyTopic;
+      const topicLine = runTopic ? `Topic: ${runTopic}` : "";
+      const abTest = !isGenerateBackup && getEnv("AB_TEST", "false").toLowerCase() === "true";
+      const variantCount = abTest ? 2 : 1;
 
-    const accessToken = await getAccessToken();
-    for (const variant of scriptsToRender) {
+      let hooks = [];
+      if (hookVariants > 0) {
+        try {
+          log("Generating hooks");
+          hooks = await generateHooks({
+            topic: runTopic,
+            apiKey: getEnv("OPENAI_API_KEY").trim(),
+            baseUrl: openaiBaseUrl,
+            model: openaiModel,
+            count: hookVariants,
+          });
+        } catch (err) {
+          log(`Hook generation failed: ${err.message}`);
+        }
+      }
+      const hookChoices = pickTopHooks(hooks, variantCount);
+      const primaryHook = hookChoices[0] || "";
+
+      log("Generating script");
+      let script = "";
+      let lastError = null;
+      let usedModel = openaiModel;
+
+      for (const model of modelsToTry) {
+        for (let attempt = 1; attempt <= maxAttemptsPerModel; attempt += 1) {
+          try {
+            log(`Script attempt ${attempt} using model: ${model}`);
+            const finalPrompt = [
+              `${prompt}\n\nLanguage: ${language}.`,
+              "Include a clear call-to-action in the last sentence.",
+              primaryHook ? `Start with this exact hook: "${primaryHook}".` : "",
+              topicLine,
+            ]
+              .filter(Boolean)
+              .join("\n");
+
+            script = await generateScript({
+              prompt: finalPrompt,
+              apiKey: getEnv("OPENAI_API_KEY").trim(),
+              baseUrl: openaiBaseUrl,
+              model,
+            });
+            if (script) {
+              usedModel = model;
+              break;
+            }
+          } catch (err) {
+            lastError = err;
+            const message = getErrorMessage(err);
+            log(`Script attempt failed: ${message}`);
+            if (isRateLimitError(err)) {
+              const delaySeconds = retryDelays[Math.min(attempt - 1, retryDelays.length - 1)] || 30;
+              const jitterMs = Math.floor(Math.random() * 5000);
+              log(`Rate limit hit. Waiting ${delaySeconds}s before retry...`);
+              await sleep(delaySeconds * 1000 + jitterMs);
+              if (modelsToTry.length > 1 && message.toLowerCase().includes("rate-limited")) {
+                log("Rate limit persists. Rotating to next model.");
+                break;
+              }
+            }
+          }
+        }
+        if (script) break;
+      }
+
+      if (!script && lastError) {
+        throw lastError;
+      }
+
+      const scriptsToRender = [];
+      const hookLabels = ["A", "B", "C"];
+      const secondaryHook = hookChoices[1] || "";
+      const baseScript = buildScriptVariant(script, primaryHook);
+      scriptsToRender.push({ label: hookLabels[0], hook: primaryHook, script: baseScript });
+      if (abTest) {
+        const altHook = secondaryHook || primaryHook;
+        const altScript = buildScriptVariant(script, altHook);
+        scriptsToRender.push({ label: hookLabels[1], hook: altHook, script: altScript });
+      }
+
+      for (const variant of scriptsToRender) {
       const scriptVariant = variant.script;
       let variantTitle = titleOverride;
       let variantDescription = descriptionOverride;
@@ -1477,36 +1701,51 @@ async function run() {
         watermarkText,
       });
 
-      log("Uploading to YouTube");
-      const uploadResult = await retry(() =>
-        uploadToYoutube({
-          accessToken,
-          refreshToken: getEnv("YOUTUBE_REFRESH_TOKEN"),
+      let uploadResult = null;
+      if (uploadToYoutubeEnabled) {
+        log("Uploading to YouTube");
+        uploadResult = await retry(() =>
+          uploadToYoutube({
+            accessToken,
+            refreshToken: getEnv("YOUTUBE_REFRESH_TOKEN"),
+            videoPath,
+            title: variantTitle,
+            description: variantDescription,
+            tags: variantTags,
+          })
+        );
+        const uploadedId = uploadResult?.id || "unknown-id";
+        const channelId =
+          uploadResult?.snippet?.channelId || getEnv("CHANNEL_ID", "").trim() || "unknown-channel";
+        log(`Upload complete: ${uploadedId}`);
+        const privacy = uploadResult?.status?.privacyStatus;
+        const channelTitle = uploadResult?.snippet?.channelTitle;
+        if (privacy) log(`Privacy: ${privacy}`);
+        if (channelTitle) log(`Channel: ${channelTitle}`);
+        log(`Watch URL: https://www.youtube.com/watch?v=${uploadedId}`);
+        log(`Studio URL: https://studio.youtube.com/video/${uploadedId}/edit`);
+        log(`Channel ID: ${channelId}`);
+      } else {
+        log("Backup generation mode: skipping YouTube upload.");
+      }
+
+      if (saveGenerated && videoPath) {
+        const dropboxGeneratedFolder = dropboxFolders.generated && dropboxSaveGenerated ? dropboxFolders.generated : "";
+        await saveGeneratedCopy({
           videoPath,
           title: variantTitle,
-          description: variantDescription,
-          tags: variantTags,
-        })
-      );
-      const uploadedId = uploadResult?.id || "unknown-id";
-      const channelId =
-        uploadResult?.snippet?.channelId || getEnv("CHANNEL_ID", "").trim() || "unknown-channel";
-      log(`Upload complete: ${uploadedId}`);
-      const privacy = uploadResult?.status?.privacyStatus;
-      const channelTitle = uploadResult?.snippet?.channelTitle;
-      if (privacy) log(`Privacy: ${privacy}`);
-      if (channelTitle) log(`Channel: ${channelTitle}`);
-      log(`Watch URL: https://www.youtube.com/watch?v=${uploadedId}`);
-      log(`Studio URL: https://studio.youtube.com/video/${uploadedId}/edit`);
-      log(`Channel ID: ${channelId}`);
+          dropboxToken,
+          dropboxFolder: dropboxGeneratedFolder,
+        });
+      }
 
       const uploadBackup = getEnv("DROPBOX_UPLOAD_BACKUPS", "false").toLowerCase() === "true";
-      if (uploadBackup && dropboxToken && dropboxFolder && videoPath) {
+      if ((uploadBackup || isGenerateBackup) && dropboxToken && dropboxFolders.backup && videoPath) {
         try {
           const nameBase = variantDescription || variantTitle;
           const dropboxPath = await uploadFileToDropbox({
             token: dropboxToken,
-            folderPath: dropboxFolder,
+            folderPath: dropboxFolders.backup,
             filePath: videoPath,
             nameBase,
           });
@@ -1517,7 +1756,7 @@ async function run() {
       }
 
       const enableThumbnail = getEnv("ENABLE_THUMBNAIL", "true").toLowerCase() !== "false";
-      if (enableThumbnail && uploadResult?.id) {
+      if (uploadToYoutubeEnabled && enableThumbnail && uploadResult?.id) {
         try {
           const thumbStyle = variant.label === "B"
             ? { fontSize: 92, outline: 7, yPos: 240, color: "yellow" }
@@ -1554,7 +1793,7 @@ async function run() {
 
       const postComment = getEnv("POST_COMMENT", "false").toLowerCase() === "true";
       const pinnedComment = getEnv("PINNED_COMMENT", "").trim();
-      if (postComment && pinnedComment && uploadResult?.id) {
+      if (uploadToYoutubeEnabled && postComment && pinnedComment && uploadResult?.id) {
         try {
           await postTopLevelComment({
             accessToken,
@@ -1570,7 +1809,7 @@ async function run() {
 
       const autoReply = getEnv("AUTO_REPLY_COMMENTS", "false").toLowerCase() === "true";
       const replyText = getEnv("REPLY_COMMENT_TEXT", "").trim();
-      if (autoReply && replyText && uploadResult?.id) {
+      if (uploadToYoutubeEnabled && autoReply && replyText && uploadResult?.id) {
         try {
           await replyToTopComment({
             accessToken,
@@ -1584,10 +1823,12 @@ async function run() {
         }
       }
 
-      const stats = await fetchVideoStats(accessToken, uploadResult?.id);
-      if (stats) {
-        updateLearning(learning, { topic: dailyTopic, hook: variant.hook, stats });
-        await saveLearningData(learningPath, learning);
+      if (uploadToYoutubeEnabled && uploadResult?.id && accessToken) {
+        const stats = await fetchVideoStats(accessToken, uploadResult?.id);
+        if (stats) {
+          updateLearning(learning, { topic: runTopic, hook: variant.hook, stats });
+          await saveLearningData(learningPath, learning);
+        }
       }
     }
   } catch (err) {
@@ -1611,7 +1852,7 @@ async function run() {
                 destDir: tempBaseDir,
                 fallbackName: first.name,
               });
-              dropboxPick = { path: downloaded, name: first.name, time: first.time };
+              dropboxPick = { path: downloaded, name: first.name, time: first.time, originPath: first.path };
             }
           } catch (err) {
             log(`Dropbox fallback failed: ${err.message}`);
@@ -1630,6 +1871,7 @@ async function run() {
                   name: dropboxPick.name,
                   deletable: false,
                   time: dropboxPick.time,
+                  originPath: dropboxPick.originPath,
                 },
               ]
             : []),
@@ -1658,6 +1900,17 @@ async function run() {
         if (fallbackResult?.id) {
           log(`Fallback upload complete: ${fallbackResult.id}`);
           fallbackSucceeded = true;
+          if (pick?.originPath && dropboxToken && (dropboxFolders.used || dropboxFolders.backup)) {
+            const usedFolder = dropboxFolders.used || `${dropboxFolders.backup}/used_videos`;
+            const targetPath = `${usedFolder}/${path.basename(pick.originPath)}`;
+            try {
+              await ensureDropboxFolder({ token: dropboxToken, path: usedFolder });
+              await moveDropboxFile({ token: dropboxToken, fromPath: pick.originPath, toPath: targetPath });
+              log(`Moved Dropbox backup to used folder: ${targetPath}`);
+            } catch (err) {
+              log(`Dropbox move failed: ${err.message}`);
+            }
+          }
         } else {
           log("Fallback upload skipped (no base videos available).");
         }
@@ -1694,10 +1947,22 @@ async function run() {
       }
     }
     if (!fallbackSucceeded) {
+      await saveLogFile({
+        logsDir,
+        dropboxToken,
+        dropboxFolder: dropboxFolders.logs,
+        label: logLabel,
+      });
       throw err;
     }
   }
 
+  await saveLogFile({
+    logsDir,
+    dropboxToken,
+    dropboxFolder: dropboxFolders.logs,
+    label: logLabel,
+  });
   await cleanupTemp(tempDir);
   if (fallbackSucceeded) return;
 }

@@ -45,6 +45,7 @@ jobs:
       - name: Run automation
         run: node scripts/autoUpload.js
         env:
+          COMMAND: RUN_AUTO
           UPLOAD_CHANCE: ${{ github.event.schedule == '0 21 * * *' && '0.6' || '1' }}
           FORCE_UPLOAD: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
           BACKUP_ONLY: ${{ github.event.inputs.mode == 'backup' && 'true' || 'false' }}
@@ -94,6 +95,19 @@ jobs:
           SCRIPT_DURATION_SECONDS: ${{ secrets.SCRIPT_DURATION_SECONDS }}
           BASE_VIDEO_URLS: ${{ secrets.BASE_VIDEO_URLS }}
           MUSIC_URLS: ${{ secrets.MUSIC_URLS }}
+          DROPBOX_ACCESS_TOKEN: ${{ secrets.DROPBOX_ACCESS_TOKEN }}
+          DROPBOX_FOLDER_PATH: ${{ secrets.DROPBOX_FOLDER_PATH }}
+          DROPBOX_SYSTEM_ROOT: ${{ secrets.DROPBOX_SYSTEM_ROOT }}
+          DROPBOX_USE_SYSTEM_FOLDERS: ${{ secrets.DROPBOX_USE_SYSTEM_FOLDERS }}
+          DROPBOX_UPLOAD_BACKUPS: ${{ secrets.DROPBOX_UPLOAD_BACKUPS }}
+          DROPBOX_SAVE_GENERATED: ${{ secrets.DROPBOX_SAVE_GENERATED }}
+          ENABLE_COMPETITOR_ANALYSIS: ${{ secrets.ENABLE_COMPETITOR_ANALYSIS }}
+          COMPETITOR_QUERY: ${{ secrets.COMPETITOR_QUERY }}
+          COMPETITOR_CHANNELS: ${{ secrets.COMPETITOR_CHANNELS }}
+          COMPETITOR_VIDEOS_PER_CHANNEL: ${{ secrets.COMPETITOR_VIDEOS_PER_CHANNEL }}
+          ENABLE_TREND_SHORTS: ${{ secrets.ENABLE_TREND_SHORTS }}
+          TREND_SHORTS_QUERY: ${{ secrets.TREND_SHORTS_QUERY }}
+          TREND_SHORTS_DAYS: ${{ secrets.TREND_SHORTS_DAYS }}
 
       - name: Upload artifacts
         if: always()

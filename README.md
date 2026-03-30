@@ -130,6 +130,17 @@ The workflow will fetch matching stock videos. If none are available, it falls b
 
 If both stock + user media exist, the pipeline always mixes them so every video blends both sources.
 
+### Dropbox backup system folders (optional)
+
+If you set `DROPBOX_SYSTEM_ROOT` (recommended), the system will manage these folders:
+
+- `/youtube_ai_system/backup_videos/`
+- `/youtube_ai_system/generated_videos/`
+- `/youtube_ai_system/used_videos/`
+- `/youtube_ai_system/logs/`
+
+When a backup is used, it is moved to `used_videos`.
+
 ### 2) Add required GitHub Secrets
 
 In your GitHub repo: **Settings -> Secrets and variables -> Actions -> New repository secret**
@@ -191,6 +202,20 @@ Optional overrides:
 - `DROPBOX_ACCESS_TOKEN` (Dropbox token for backup folder access)
 - `DROPBOX_FOLDER_PATH` (Dropbox folder path, e.g. `/ShortsBackups`)
 - `DROPBOX_UPLOAD_BACKUPS` (`true` or `false`, default: `false`, saves generated videos into Dropbox folder)
+- `DROPBOX_SYSTEM_ROOT` (optional root path like `/youtube_ai_system` to enable backup/used/generated/logs folders)
+- `DROPBOX_USE_SYSTEM_FOLDERS` (`true` to use system folders even if `DROPBOX_SYSTEM_ROOT` is empty)
+- `DROPBOX_USED_FOLDER_PATH` (optional used folder when not using system folders)
+- `DROPBOX_SAVE_GENERATED` (`true` or `false`, default: `true`, saves generated videos to Dropbox generated folder)
+- `SAVE_GENERATED_VIDEOS` (`true` or `false`, default: `true`, saves local copies in `/generated_videos`)
+- `COMMAND` (`RUN_AUTO`, `UPLOAD_NOW`, `GENERATE_BACKUP`, `CHECK_LOGS`)
+- `BACKUP_GENERATE_COUNT` (default: `5`, number of backup videos to generate when `COMMAND=GENERATE_BACKUP`)
+- `ENABLE_COMPETITOR_ANALYSIS` (`true` or `false`, default: `true`)
+- `COMPETITOR_QUERY` (search query for competitor channels)
+- `COMPETITOR_CHANNELS` (default: `5`)
+- `COMPETITOR_VIDEOS_PER_CHANNEL` (default: `5`)
+- `ENABLE_TREND_SHORTS` (`true` or `false`, default: `true`)
+- `TREND_SHORTS_QUERY` (search query for viral shorts)
+- `TREND_SHORTS_DAYS` (default: `7`)
 - `SUBTITLE_MODE` (`word` or `sentence`, default: `word`)
 - `SUBTITLE_HIGHLIGHT` (`true` or `false`, default: `true`)
 - `EXTRA_EFFECTS` (`true` or `false`, default: `true`)
@@ -268,6 +293,9 @@ You now have **two simple GitHub Action buttons**:
 
 2. **Manual Backup Upload**  
    Uploads backup videos from Dropbox or `BASE_VIDEO_URLS`.
+
+3. **Generate Backup Videos**  
+   Creates 5–10 AI videos and saves them into your Dropbox backup folder.
 
 Go to **GitHub → Actions**, select the workflow you want, then click **Run workflow**.
 

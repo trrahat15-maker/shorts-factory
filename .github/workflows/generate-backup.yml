@@ -1,18 +1,18 @@
-name: Manual AI Upload
+name: Generate Backup Videos
 
 on:
   workflow_dispatch:
     inputs:
-      force_public:
-        description: "Force public visibility (true/false)"
+      count:
+        description: "How many backup videos to generate"
         required: false
-        default: "false"
+        default: "5"
 
 permissions:
   contents: read
 
 jobs:
-  upload:
+  generate:
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -36,13 +36,11 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Run AI automation
+      - name: Generate backups
         run: node scripts/autoUpload.js
         env:
-          COMMAND: UPLOAD_NOW
-          FORCE_UPLOAD: "true"
-          BACKUP_ONLY: "false"
-          YOUTUBE_PRIVACY_STATUS: ${{ github.event.inputs.force_public == 'true' && 'public' || secrets.YOUTUBE_PRIVACY_STATUS || 'public' }}
+          COMMAND: GENERATE_BACKUP
+          BACKUP_GENERATE_COUNT: ${{ github.event.inputs.count || '5' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
@@ -57,15 +55,13 @@ jobs:
           TRENDS_REGION: ${{ secrets.TRENDS_REGION }}
           TRENDS_LANGUAGE: ${{ secrets.TRENDS_LANGUAGE }}
           TREND_MAX_TOPICS: ${{ secrets.TREND_MAX_TOPICS }}
-          HOOK_VARIANTS: ${{ secrets.HOOK_VARIANTS }}
-          AB_TEST: ${{ secrets.AB_TEST }}
-          POST_COMMENT: ${{ secrets.POST_COMMENT }}
-          PINNED_COMMENT: ${{ secrets.PINNED_COMMENT }}
-          SAVE_ARTIFACTS: ${{ secrets.SAVE_ARTIFACTS }}
-          ENABLE_THUMBNAIL: ${{ secrets.ENABLE_THUMBNAIL }}
-          AUTO_REPLY_COMMENTS: ${{ secrets.AUTO_REPLY_COMMENTS }}
-          REPLY_COMMENT_TEXT: ${{ secrets.REPLY_COMMENT_TEXT }}
-          SMART_SCHEDULE: "false"
+          ENABLE_COMPETITOR_ANALYSIS: ${{ secrets.ENABLE_COMPETITOR_ANALYSIS }}
+          COMPETITOR_QUERY: ${{ secrets.COMPETITOR_QUERY }}
+          COMPETITOR_CHANNELS: ${{ secrets.COMPETITOR_CHANNELS }}
+          COMPETITOR_VIDEOS_PER_CHANNEL: ${{ secrets.COMPETITOR_VIDEOS_PER_CHANNEL }}
+          ENABLE_TREND_SHORTS: ${{ secrets.ENABLE_TREND_SHORTS }}
+          TREND_SHORTS_QUERY: ${{ secrets.TREND_SHORTS_QUERY }}
+          TREND_SHORTS_DAYS: ${{ secrets.TREND_SHORTS_DAYS }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           ENABLE_STOCK_VIDEO: ${{ secrets.ENABLE_STOCK_VIDEO }}
@@ -86,15 +82,16 @@ jobs:
           DROPBOX_FOLDER_PATH: ${{ secrets.DROPBOX_FOLDER_PATH }}
           DROPBOX_SYSTEM_ROOT: ${{ secrets.DROPBOX_SYSTEM_ROOT }}
           DROPBOX_USE_SYSTEM_FOLDERS: ${{ secrets.DROPBOX_USE_SYSTEM_FOLDERS }}
+          DROPBOX_UPLOAD_BACKUPS: "true"
           DROPBOX_SAVE_GENERATED: ${{ secrets.DROPBOX_SAVE_GENERATED }}
-          DROPBOX_UPLOAD_BACKUPS: ${{ secrets.DROPBOX_UPLOAD_BACKUPS }}
 
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: manual-ai-artifacts
+          name: backup-generator-artifacts
           if-no-files-found: warn
           path: |
+            generated_videos/*.mp4
             artifacts/*.mp4
             data/learning.json

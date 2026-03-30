@@ -4,6 +4,8 @@ mobile/_git/
 data/
 uploads/
 artifacts/
+generated_videos/
+logs/
 .env
 .env.*
 .env.local
