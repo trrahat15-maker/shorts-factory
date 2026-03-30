@@ -299,6 +299,8 @@ You now have **two simple GitHub Action buttons**:
 
 Go to **GitHub → Actions**, select the workflow you want, then click **Run workflow**.
 
+You also have **Test Dropbox Connection** to verify your Dropbox token + folder path.
+
 ### 3) Enable the workflow
 
 The workflow file is:

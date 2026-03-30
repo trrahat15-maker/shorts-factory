@@ -1,0 +1,35 @@
+name: Test Dropbox Connection
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Test Dropbox
+        run: node scripts/testDropbox.js
+        env:
+          DROPBOX_ACCESS_TOKEN: ${{ secrets.DROPBOX_ACCESS_TOKEN }}
+          DROPBOX_FOLDER_PATH: ${{ secrets.DROPBOX_FOLDER_PATH }}
+          DROPBOX_SYSTEM_ROOT: ${{ secrets.DROPBOX_SYSTEM_ROOT }}
+          DROPBOX_USE_SYSTEM_FOLDERS: ${{ secrets.DROPBOX_USE_SYSTEM_FOLDERS }}
+          DROPBOX_USED_FOLDER_PATH: ${{ secrets.DROPBOX_USED_FOLDER_PATH }}
