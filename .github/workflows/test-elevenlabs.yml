@@ -1,0 +1,39 @@
+name: Test ElevenLabs Keys
+
+on:
+  workflow_dispatch:
+    inputs:
+      tts:
+        description: "Run a tiny TTS test (uses a small amount of credits)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Test ElevenLabs
+        run: node scripts/testElevenLabs.js
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_API_KEYS: ${{ secrets.ELEVENLABS_API_KEYS }}
+          ELEVENLABS_TEST_TTS: ${{ github.event.inputs.tts }}
+          ELEVENLABS_TEST_VOICE: ${{ secrets.ELEVENLABS_VOICE }}

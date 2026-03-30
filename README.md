@@ -305,6 +305,8 @@ Go to **GitHub → Actions**, select the workflow you want, then click **Run wor
 
 You also have **Test Dropbox Connection** to verify your Dropbox token + folder path.
 
+You also have **Test ElevenLabs Keys** to validate multiple API keys (optional tiny TTS check).
+
 ### 3) Enable the workflow
 
 The workflow file is:
