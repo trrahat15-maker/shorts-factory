@@ -26,7 +26,6 @@ const log = (message) => {
 
 const REQUIRED_ENV = [
   "OPENAI_API_KEY",
-  "ELEVENLABS_API_KEY",
   "YOUTUBE_CLIENT_ID",
   "YOUTUBE_CLIENT_SECRET",
   "YOUTUBE_REFRESH_TOKEN",
@@ -49,6 +48,13 @@ function shouldSkipRun() {
 
 function requireEnv() {
   const missing = REQUIRED_ENV.filter((key) => !process.env[key]);
+  const hasEleven =
+    Boolean((process.env.ELEVENLABS_API_KEY || "").trim()) ||
+    Boolean((process.env.ELEVENLABS_API_KEYS || "").trim());
+  const freeTtsEnabled = (process.env.FREE_TTS || "true").toLowerCase() !== "false";
+  if (!hasEleven && !freeTtsEnabled) {
+    missing.push("ELEVENLABS_API_KEY (or ELEVENLABS_API_KEYS or FREE_TTS=true)");
+  }
   if (missing.length) {
     throw new Error(`Missing required secrets: ${missing.join(", ")}`);
   }
