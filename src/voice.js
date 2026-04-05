@@ -27,6 +27,13 @@ export async function generateVoice({ text, voice = "alloy", elevenLabsApiKey, o
   const filename = `voice-${Date.now()}.mp3`;
   const outPath = path.join(outDir, filename);
   const allowFreeTts = process.env.FREE_TTS?.toLowerCase() !== "false";
+  const elevenModel = process.env.ELEVENLABS_MODEL || "eleven_multilingual_v2";
+  const voiceSettings = {
+    stability: Number(process.env.ELEVENLABS_STABILITY ?? 0.35),
+    similarity_boost: Number(process.env.ELEVENLABS_SIMILARITY ?? 0.85),
+    style: Number(process.env.ELEVENLABS_STYLE ?? 0.45),
+    speaker_boost: (process.env.ELEVENLABS_SPEAKER_BOOST ?? "true").toLowerCase() !== "false",
+  };
 
   const envKeys = (process.env.ELEVENLABS_API_KEYS || "")
     .split(/[,\n;]/)
@@ -42,9 +49,14 @@ export async function generateVoice({ text, voice = "alloy", elevenLabsApiKey, o
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Accept: "audio/mpeg",
           "xi-api-key": apiKey,
         },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({
+          text,
+          model_id: elevenModel,
+          voice_settings: voiceSettings,
+        }),
       });
 
       if (!res.ok) {
