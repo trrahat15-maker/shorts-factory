@@ -1281,6 +1281,7 @@ async function run() {
     targetSecondsRaw = maxDuration || (viralMode ? 30 : 30);
   }
   const targetSeconds = Math.max(minDuration || 0, targetSecondsRaw || 30);
+  const islamicContent = getEnv("ISLAMIC_CONTENT", "false").toLowerCase() === "true";
   const prompt = getEnv(
     "PROMPT",
     [
@@ -1292,8 +1293,12 @@ async function run() {
       "Last 3 sec: loop ending that connects back to the first line.",
       "Use triggers: curiosity, fear, success, money, secrets.",
       "Hook examples: \"You're doing this wrong...\", \"This is why you're not successful...\", \"Nobody tells you this...\"",
-      "Keep sentences short and punchy.",
-    ].join(" ")
+      "Keep sentences short and punchy (5-12 words per phrase).",
+      "Add natural micro-pauses using commas, dashes, or ellipses.",
+      islamicContent
+        ? "Include authentic Islamic values and themes (sabr, tawakkul, gratitude, prayer, self-discipline). Do not invent quotes or hadith; keep it respectful and general."
+        : "",
+    ].filter(Boolean).join(" ")
   );
   const language = getEnv("SCRIPT_LANGUAGE", "English").trim();
   const topics = parseCsv(getEnv("TOPIC_LIST", "success,mindset,money,productivity"));

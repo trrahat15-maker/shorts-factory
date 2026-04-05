@@ -116,11 +116,12 @@ function buildTimedSubtitles(script, totalDuration, options = {}) {
   const mode = options.mode || "sentence";
   const highlightWords = Array.isArray(options.highlightWords) ? options.highlightWords : [];
   const highlightSet = new Set(highlightWords.map((w) => normalizeWord(w)));
+  const envWps = Number(process.env.WORDS_PER_SECOND || 0);
+  const fallbackWps = envWps > 0 ? envWps : 2.6;
 
   if (mode === "word") {
     const words = script.split(/\s+/).map((w) => w.trim()).filter(Boolean);
     if (!words.length) return [];
-    const fallbackWps = 2.6;
     const duration = totalDuration || words.length / fallbackWps;
     const punctWeight = Number(process.env.SUBTITLE_PUNCT_WEIGHT || "0.35");
     const weights = words.map((word) => (/[.!?]$/.test(word) ? 1 + punctWeight : 1));
@@ -145,7 +146,6 @@ function buildTimedSubtitles(script, totalDuration, options = {}) {
   if (!sentences.length) return [];
   const words = sentences.map((s) => s.split(/\s+/).filter(Boolean).length);
   const totalWords = words.reduce((acc, n) => acc + n, 0) || 1;
-  const fallbackWps = 2.6;
   const duration = totalDuration || totalWords / fallbackWps;
 
   let cursor = 0;
