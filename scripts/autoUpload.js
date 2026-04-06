@@ -25,7 +25,6 @@ const log = (message) => {
 };
 
 const REQUIRED_ENV = [
-  "OPENAI_API_KEY",
   "YOUTUBE_CLIENT_ID",
   "YOUTUBE_CLIENT_SECRET",
   "YOUTUBE_REFRESH_TOKEN",
@@ -48,6 +47,10 @@ function shouldSkipRun() {
 
 function requireEnv() {
   const missing = REQUIRED_ENV.filter((key) => !process.env[key]);
+  const backupOnly = (process.env.BACKUP_ONLY || "false").toLowerCase() === "true";
+  if (!backupOnly && !process.env.OPENAI_API_KEY) {
+    missing.push("OPENAI_API_KEY");
+  }
   const hasEleven =
     Boolean((process.env.ELEVENLABS_API_KEY || "").trim()) ||
     Boolean((process.env.ELEVENLABS_API_KEYS || "").trim());
@@ -1140,10 +1143,13 @@ async function run() {
 
   const backupOnly = getEnv("BACKUP_ONLY", "false").toLowerCase() === "true";
   if (backupOnly) {
+    const dropboxOnly = getEnv("DROPBOX_ONLY", "false").toLowerCase() === "true";
     const accessToken = await getAccessToken();
     const backupCount = Number(getEnv("BACKUP_UPLOAD_COUNT", "1")) || 1;
-    const localVideos = await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
-    const downloadedVideos = downloadedBase.map((file) => path.basename(file));
+    const localVideos = dropboxOnly
+      ? []
+      : await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
+    const downloadedVideos = dropboxOnly ? [] : downloadedBase.map((file) => path.basename(file));
     let dropboxVideos = [];
     if (dropboxToken && dropboxFolder) {
       try {

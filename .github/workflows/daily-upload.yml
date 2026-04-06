@@ -11,7 +11,7 @@ on:
       mode:
         description: "auto = generate new video, backup = upload from backup list"
         required: true
-        default: "auto"
+        default: "backup"
       backup_count:
         description: "How many backup videos to upload (backup mode only)"
         required: false
@@ -51,8 +51,12 @@ jobs:
           COMMAND: RUN_AUTO
           UPLOAD_CHANCE: "1"
           FORCE_UPLOAD: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
-          BACKUP_ONLY: ${{ github.event.inputs.mode == 'backup' && 'true' || 'false' }}
+          BACKUP_ONLY: ${{ github.event.inputs.mode == 'auto' && 'false' || 'true' }}
           BACKUP_UPLOAD_COUNT: ${{ github.event.inputs.backup_count || '1' }}
+          DROPBOX_ONLY: "true"
+          MANUAL_TITLE_FROM_FILENAME: "true"
+          MANUAL_DESCRIPTION_FROM_FILENAME: "true"
+          SMART_SCHEDULE: "false"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
