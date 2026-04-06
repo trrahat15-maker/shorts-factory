@@ -178,6 +178,7 @@ function getDropboxFolders() {
   if (useSystem) {
     const base = root || "/youtube_ai_system";
     return {
+      root: base,
       backup: `${base}/backup_videos`,
       generated: `${base}/generated_videos`,
       used: `${base}/used_videos`,
@@ -185,6 +186,7 @@ function getDropboxFolders() {
     };
   }
   return {
+    root: normalizeDropboxPath(getEnv("DROPBOX_FOLDER_PATH", "").trim()),
     backup: normalizeDropboxPath(getEnv("DROPBOX_FOLDER_PATH", "").trim()),
     generated: "",
     used: normalizeDropboxPath(getEnv("DROPBOX_USED_FOLDER_PATH", "").trim()),
@@ -1190,6 +1192,7 @@ async function run() {
   const dropboxToken = getEnv("DROPBOX_ACCESS_TOKEN", "").trim();
   const dropboxFolders = getDropboxFolders();
   const dropboxFolder = dropboxFolders.backup;
+  const dropboxRoot = dropboxFolders.root;
   log(`Dropbox mode: useSystem=${getEnv("DROPBOX_USE_SYSTEM_FOLDERS", "false")} root=${getEnv("DROPBOX_SYSTEM_ROOT", "").trim()}`);
   log(`Dropbox backup folder: ${dropboxFolder || "(empty)"}`);
 
@@ -1224,6 +1227,15 @@ async function run() {
         log(`Dropbox backup files found: ${dropboxVideos.length}`);
       } catch (err) {
         log(`Dropbox list failed: ${err.message}`);
+      }
+    }
+    if (!dropboxVideos.length && dropboxToken && dropboxRoot && dropboxRoot !== dropboxFolder) {
+      try {
+        log("Dropbox backup folder empty. Checking root folder for videos.");
+        dropboxVideos = await listDropboxVideos({ token: dropboxToken, folderPath: dropboxRoot });
+        log(`Dropbox root files found: ${dropboxVideos.length}`);
+      } catch (err) {
+        log(`Dropbox root list failed: ${err.message}`);
       }
     }
     const dropboxDownloads = [];
