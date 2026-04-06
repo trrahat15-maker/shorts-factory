@@ -1245,7 +1245,10 @@ async function run() {
       for (let i = 0; i < needed; i += 1) {
         const item = dropboxVideos[i];
         try {
-          const primaryPath = item.id ? `id:${item.id}` : item.pathLower || item.pathDisplay;
+          const dropboxId = item.id || "";
+          const primaryPath = dropboxId
+            ? dropboxId.startsWith("id:") ? dropboxId : `id:${dropboxId}`
+            : item.pathLower || item.pathDisplay;
           const altPath = item.pathDisplay && item.pathDisplay !== primaryPath ? item.pathDisplay : "";
           if (!primaryPath) throw new Error("Dropbox item path is empty.");
           let pathDownloaded = "";
@@ -2061,7 +2064,10 @@ async function run() {
             const dropboxVideos = await listDropboxVideos({ token: dropboxToken, folderPath: dropboxFolder });
             const first = dropboxVideos[0];
             if (first) {
-              const primaryPath = first.id ? `id:${first.id}` : first.pathLower || first.pathDisplay;
+              const dropboxId = first.id || "";
+              const primaryPath = dropboxId
+                ? dropboxId.startsWith("id:") ? dropboxId : `id:${dropboxId}`
+                : first.pathLower || first.pathDisplay;
               const altPath = first.pathDisplay && first.pathDisplay !== primaryPath ? first.pathDisplay : "";
               if (!primaryPath) throw new Error("Dropbox item path is empty.");
               let downloaded = "";
