@@ -653,6 +653,12 @@ function buildTitleHashtags(title, maxCount = 5) {
   return unique.slice(0, maxCount).map((w) => `#${w}`);
 }
 
+function hashtagsToTags(hashtags) {
+  return (hashtags || [])
+    .map((tag) => String(tag).replace(/^#/, "").trim())
+    .filter(Boolean);
+}
+
 async function deleteDropboxFile({ token, filePath }) {
   if (!token || !filePath) return null;
   return dropboxFetch("https://api.dropboxapi.com/2/files/delete_v2", token, {
@@ -683,8 +689,13 @@ async function uploadManualBaseVideo({
   const deleteAfterUpload = getEnv("DELETE_BASE_VIDEO_AFTER_UPLOAD", "true").toLowerCase() !== "false";
   const autoHashtags = getEnv("AUTO_HASHTAGS_FROM_TITLE", "true").toLowerCase() !== "false";
   const titleHashtags = autoHashtags ? buildTitleHashtags(fileLabel) : [];
+  const addHashtagsToTitle = getEnv("ADD_HASHTAGS_TO_TITLE", "false").toLowerCase() === "true";
 
   let title = titleOverride || (useTitleFromName ? fileLabel : "");
+  if (addHashtagsToTitle && titleHashtags.length) {
+    const titleWithTags = `${title} ${titleHashtags.join(" ")}`.trim();
+    title = titleWithTags.length > 90 ? title : titleWithTags;
+  }
   let description = descriptionOverride || (useDescFromName ? fileLabel : defaultDescription);
   let tags = tagsOverride?.length ? tagsOverride : defaultTags;
   const combinedHashtags = [
@@ -693,6 +704,8 @@ async function uploadManualBaseVideo({
   ];
   if (combinedHashtags.length) {
     description = withHashtags(description, combinedHashtags);
+    const hashTagsAsTags = hashtagsToTags(combinedHashtags);
+    tags = Array.from(new Set([...(tags || []), ...hashTagsAsTags]));
   }
   if (!tags.includes("shorts")) {
     tags = [...tags, "shorts"];
@@ -740,8 +753,13 @@ async function uploadManualBaseVideoPath({
   const useDescFromName = getEnv("MANUAL_DESCRIPTION_FROM_FILENAME", "true").toLowerCase() !== "false";
   const autoHashtags = getEnv("AUTO_HASHTAGS_FROM_TITLE", "true").toLowerCase() !== "false";
   const titleHashtags = autoHashtags ? buildTitleHashtags(fileLabel) : [];
+  const addHashtagsToTitle = getEnv("ADD_HASHTAGS_TO_TITLE", "false").toLowerCase() === "true";
 
   let title = metaTitle || titleOverride || (useTitleFromName ? fileLabel : "");
+  if (addHashtagsToTitle && titleHashtags.length) {
+    const titleWithTags = `${title} ${titleHashtags.join(" ")}`.trim();
+    title = titleWithTags.length > 90 ? title : titleWithTags;
+  }
   let description = metaDescription || descriptionOverride || (useDescFromName ? fileLabel : defaultDescription);
   let tags = metaTags?.length ? metaTags : tagsOverride?.length ? tagsOverride : defaultTags;
   const combinedHashtags = [
@@ -750,6 +768,8 @@ async function uploadManualBaseVideoPath({
   ];
   if (combinedHashtags.length) {
     description = withHashtags(description, combinedHashtags);
+    const hashTagsAsTags = hashtagsToTags(combinedHashtags);
+    tags = Array.from(new Set([...(tags || []), ...hashTagsAsTags]));
   }
   if (!tags.includes("shorts")) {
     tags = [...tags, "shorts"];
