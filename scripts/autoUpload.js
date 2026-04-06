@@ -211,7 +211,8 @@ async function listDropboxVideos({ token, folderPath }) {
       if (![".mp4", ".mov", ".mkv", ".webm"].some((ext) => lower.endsWith(ext))) return;
       files.push({
         name,
-        path: entry.path_lower || entry.path_display,
+        pathLower: entry.path_lower || "",
+        pathDisplay: entry.path_display || "",
         time: new Date(entry.server_modified || 0).getTime(),
       });
     });
@@ -1228,20 +1229,37 @@ async function run() {
       for (let i = 0; i < needed; i += 1) {
         const item = dropboxVideos[i];
         try {
-          // eslint-disable-next-line no-await-in-loop
-          const pathDownloaded = await downloadDropboxFile({
-            token: dropboxToken,
-            filePath: item.path,
-            destDir: tempBaseDir,
-            fallbackName: item.name,
-          });
-          const metaPath = item.path.replace(/\.[^.]+$/, ".json");
+          const primaryPath = item.pathLower || item.pathDisplay;
+          const altPath = item.pathDisplay && item.pathDisplay !== primaryPath ? item.pathDisplay : "";
+          if (!primaryPath) throw new Error("Dropbox item path is empty.");
+          let pathDownloaded = "";
+          let originPath = primaryPath;
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            pathDownloaded = await downloadDropboxFile({
+              token: dropboxToken,
+              filePath: primaryPath,
+              destDir: tempBaseDir,
+              fallbackName: item.name,
+            });
+          } catch (primaryErr) {
+            if (!altPath) throw primaryErr;
+            // eslint-disable-next-line no-await-in-loop
+            pathDownloaded = await downloadDropboxFile({
+              token: dropboxToken,
+              filePath: altPath,
+              destDir: tempBaseDir,
+              fallbackName: item.name,
+            });
+            originPath = altPath;
+          }
+          const metaPath = (originPath || primaryPath).replace(/\.[^.]+$/, ".json");
           const meta = await downloadDropboxMetadata({ token: dropboxToken, metaPath });
           dropboxDownloads.push({
             path: pathDownloaded,
             name: item.name,
             time: item.time,
-            originPath: item.path,
+            originPath,
             metaPath,
             meta,
           });
@@ -2024,19 +2042,35 @@ async function run() {
             const dropboxVideos = await listDropboxVideos({ token: dropboxToken, folderPath: dropboxFolder });
             const first = dropboxVideos[0];
             if (first) {
-              const downloaded = await downloadDropboxFile({
-                token: dropboxToken,
-                filePath: first.path,
-                destDir: tempBaseDir,
-                fallbackName: first.name,
-              });
-              const metaPath = first.path.replace(/\.[^.]+$/, ".json");
+              const primaryPath = first.pathLower || first.pathDisplay;
+              const altPath = first.pathDisplay && first.pathDisplay !== primaryPath ? first.pathDisplay : "";
+              if (!primaryPath) throw new Error("Dropbox item path is empty.");
+              let downloaded = "";
+              let originPath = primaryPath;
+              try {
+                downloaded = await downloadDropboxFile({
+                  token: dropboxToken,
+                  filePath: primaryPath,
+                  destDir: tempBaseDir,
+                  fallbackName: first.name,
+                });
+              } catch (primaryErr) {
+                if (!altPath) throw primaryErr;
+                downloaded = await downloadDropboxFile({
+                  token: dropboxToken,
+                  filePath: altPath,
+                  destDir: tempBaseDir,
+                  fallbackName: first.name,
+                });
+                originPath = altPath;
+              }
+              const metaPath = (originPath || primaryPath).replace(/\.[^.]+$/, ".json");
               const meta = await downloadDropboxMetadata({ token: dropboxToken, metaPath });
               dropboxPick = {
                 path: downloaded,
                 name: first.name,
                 time: first.time,
-                originPath: first.path,
+                originPath,
                 metaPath,
                 meta,
               };
