@@ -1190,6 +1190,8 @@ async function run() {
   const dropboxToken = getEnv("DROPBOX_ACCESS_TOKEN", "").trim();
   const dropboxFolders = getDropboxFolders();
   const dropboxFolder = dropboxFolders.backup;
+  log(`Dropbox mode: useSystem=${getEnv("DROPBOX_USE_SYSTEM_FOLDERS", "false")} root=${getEnv("DROPBOX_SYSTEM_ROOT", "").trim()}`);
+  log(`Dropbox backup folder: ${dropboxFolder || "(empty)"}`);
 
   const downloadedBase = await downloadMediaList(baseVideoUrls, tempBaseDir, "base-video");
   const downloadedMusic = await downloadMediaList(musicUrls, tempMusicDir, "music");
@@ -1219,6 +1221,7 @@ async function run() {
     if (dropboxToken && dropboxFolder) {
       try {
         dropboxVideos = await listDropboxVideos({ token: dropboxToken, folderPath: dropboxFolder });
+        log(`Dropbox backup files found: ${dropboxVideos.length}`);
       } catch (err) {
         log(`Dropbox list failed: ${err.message}`);
       }
