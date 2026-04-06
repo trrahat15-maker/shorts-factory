@@ -605,6 +605,57 @@ function withHashtags(description, hashtags) {
   return `${description.trim()}\n\n${missing.join(" ")}`;
 }
 
+function buildTitleHashtags(title, maxCount = 5) {
+  const stop = new Set([
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "but",
+    "to",
+    "of",
+    "in",
+    "on",
+    "for",
+    "with",
+    "from",
+    "your",
+    "you",
+    "we",
+    "our",
+    "is",
+    "are",
+    "this",
+    "that",
+    "it",
+    "be",
+    "as",
+    "at",
+    "by",
+    "not",
+    "no",
+    "now",
+    "then",
+    "so",
+  ]);
+  const words = String(title || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length > 2 && !stop.has(w));
+  const unique = Array.from(new Set(words));
+  return unique.slice(0, maxCount).map((w) => `#${w}`);
+}
+
+async function deleteDropboxFile({ token, filePath }) {
+  if (!token || !filePath) return null;
+  return dropboxFetch("https://api.dropboxapi.com/2/files/delete_v2", token, {
+    path: filePath,
+  });
+}
+
 async function uploadManualBaseVideo({
   baseDir,
   tempDir,
@@ -626,12 +677,18 @@ async function uploadManualBaseVideo({
   const useTitleFromName = getEnv("MANUAL_TITLE_FROM_FILENAME", "true").toLowerCase() !== "false";
   const useDescFromName = getEnv("MANUAL_DESCRIPTION_FROM_FILENAME", "true").toLowerCase() !== "false";
   const deleteAfterUpload = getEnv("DELETE_BASE_VIDEO_AFTER_UPLOAD", "true").toLowerCase() !== "false";
+  const autoHashtags = getEnv("AUTO_HASHTAGS_FROM_TITLE", "true").toLowerCase() !== "false";
+  const titleHashtags = autoHashtags ? buildTitleHashtags(fileLabel) : [];
 
   let title = titleOverride || (useTitleFromName ? fileLabel : "");
   let description = descriptionOverride || (useDescFromName ? fileLabel : defaultDescription);
   let tags = tagsOverride?.length ? tagsOverride : defaultTags;
-  if (extraHashtags?.length) {
-    description = withHashtags(description, extraHashtags);
+  const combinedHashtags = [
+    ...(extraHashtags || []),
+    ...titleHashtags,
+  ];
+  if (combinedHashtags.length) {
+    description = withHashtags(description, combinedHashtags);
   }
   if (!tags.includes("shorts")) {
     tags = [...tags, "shorts"];
@@ -677,12 +734,18 @@ async function uploadManualBaseVideoPath({
   const fileLabel = filenameToText(fileName || path.basename(filePath)) || "Manual Upload";
   const useTitleFromName = getEnv("MANUAL_TITLE_FROM_FILENAME", "true").toLowerCase() !== "false";
   const useDescFromName = getEnv("MANUAL_DESCRIPTION_FROM_FILENAME", "true").toLowerCase() !== "false";
+  const autoHashtags = getEnv("AUTO_HASHTAGS_FROM_TITLE", "true").toLowerCase() !== "false";
+  const titleHashtags = autoHashtags ? buildTitleHashtags(fileLabel) : [];
 
   let title = metaTitle || titleOverride || (useTitleFromName ? fileLabel : "");
   let description = metaDescription || descriptionOverride || (useDescFromName ? fileLabel : defaultDescription);
   let tags = metaTags?.length ? metaTags : tagsOverride?.length ? tagsOverride : defaultTags;
-  if (extraHashtags?.length) {
-    description = withHashtags(description, extraHashtags);
+  const combinedHashtags = [
+    ...(extraHashtags || []),
+    ...titleHashtags,
+  ];
+  if (combinedHashtags.length) {
+    description = withHashtags(description, combinedHashtags);
   }
   if (!tags.includes("shorts")) {
     tags = [...tags, "shorts"];
@@ -1146,6 +1209,7 @@ async function run() {
     const dropboxOnly = getEnv("DROPBOX_ONLY", "false").toLowerCase() === "true";
     const accessToken = await getAccessToken();
     const backupCount = Number(getEnv("BACKUP_UPLOAD_COUNT", "1")) || 1;
+    const dropboxDeleteAfter = getEnv("DROPBOX_DELETE_AFTER_UPLOAD", "true").toLowerCase() !== "false";
     const localVideos = dropboxOnly
       ? []
       : await listMediaFiles(baseDir, [".mp4", ".mov", ".mkv", ".webm"]);
@@ -1198,6 +1262,8 @@ async function run() {
         deletable: false,
         time: file.time,
         originPath: file.originPath,
+        metaPath: file.metaPath,
+        meta: file.meta,
       })),
       ...localVideos.map((file) => ({
         path: path.join(baseDir, file),
@@ -1236,16 +1302,27 @@ async function run() {
         const usedFolder = dropboxFolders.used || `${dropboxFolders.backup}/used_videos`;
         const targetPath = `${usedFolder}/${path.basename(item.originPath)}`;
         try {
-          // eslint-disable-next-line no-await-in-loop
-          await ensureDropboxFolder({ token: dropboxToken, path: usedFolder });
-          // eslint-disable-next-line no-await-in-loop
-          await moveDropboxFile({ token: dropboxToken, fromPath: item.originPath, toPath: targetPath });
-          log(`Moved Dropbox backup to used folder: ${targetPath}`);
-          if (item.metaPath) {
-            const metaTarget = `${usedFolder}/${path.basename(item.metaPath)}`;
+          if (dropboxDeleteAfter) {
             // eslint-disable-next-line no-await-in-loop
-            await moveDropboxFile({ token: dropboxToken, fromPath: item.metaPath, toPath: metaTarget });
-            log(`Moved Dropbox metadata to used folder: ${metaTarget}`);
+            await deleteDropboxFile({ token: dropboxToken, filePath: item.originPath });
+            log(`Deleted Dropbox backup after upload: ${item.originPath}`);
+            if (item.metaPath) {
+              // eslint-disable-next-line no-await-in-loop
+              await deleteDropboxFile({ token: dropboxToken, filePath: item.metaPath });
+              log(`Deleted Dropbox metadata after upload: ${item.metaPath}`);
+            }
+          } else {
+            // eslint-disable-next-line no-await-in-loop
+            await ensureDropboxFolder({ token: dropboxToken, path: usedFolder });
+            // eslint-disable-next-line no-await-in-loop
+            await moveDropboxFile({ token: dropboxToken, fromPath: item.originPath, toPath: targetPath });
+            log(`Moved Dropbox backup to used folder: ${targetPath}`);
+            if (item.metaPath) {
+              const metaTarget = `${usedFolder}/${path.basename(item.metaPath)}`;
+              // eslint-disable-next-line no-await-in-loop
+              await moveDropboxFile({ token: dropboxToken, fromPath: item.metaPath, toPath: metaTarget });
+              log(`Moved Dropbox metadata to used folder: ${metaTarget}`);
+            }
           }
         } catch (err) {
           log(`Dropbox move failed: ${err.message}`);
