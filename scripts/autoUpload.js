@@ -982,14 +982,24 @@ async function getAccessToken() {
   const redirectUri = getEnv("YOUTUBE_REDIRECT_URI", "http://localhost:3000/api/youtube/callback");
   const refreshToken = getEnv("YOUTUBE_REFRESH_TOKEN");
 
-  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
-  oauth2Client.setCredentials({ refresh_token: refreshToken });
-  const tokenResponse = await oauth2Client.getAccessToken();
-  const accessToken = tokenResponse?.token || tokenResponse;
-  if (!accessToken) {
-    throw new Error("Failed to refresh YouTube access token.");
+  try {
+    const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+    oauth2Client.setCredentials({ refresh_token: refreshToken });
+    const tokenResponse = await oauth2Client.getAccessToken();
+    const accessToken = tokenResponse?.token || tokenResponse;
+    if (!accessToken) {
+      throw new Error("Failed to refresh YouTube access token.");
+    }
+    return accessToken;
+  } catch (err) {
+    const raw = String(err?.message || "");
+    if (/invalid_grant|expired or revoked|Token has been expired/i.test(raw)) {
+      throw new Error(
+        "YouTube refresh token is invalid/expired. Regenerate YOUTUBE_REFRESH_TOKEN and update GitHub Secrets."
+      );
+    }
+    throw err;
   }
-  return accessToken;
 }
 
 async function fetchVideoStats(accessToken, videoId) {
