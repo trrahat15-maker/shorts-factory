@@ -71,9 +71,14 @@ jobs:
           mkdir -p base-videos music data logs generated_videos
 
       - name: Download base videos from URLs (if configured)
-        if: ${{ secrets.BASE_VIDEO_URLS != '' }}
+        env:
+          BASE_VIDEO_URLS: ${{ secrets.BASE_VIDEO_URLS }}
         run: |
-          IFS=',' read -ra URLS <<< "${{ secrets.BASE_VIDEO_URLS }}"
+          if [ -z "$BASE_VIDEO_URLS" ]; then
+            echo "No BASE_VIDEO_URLS configured, skipping."
+            exit 0
+          fi
+          IFS=',' read -ra URLS <<< "$BASE_VIDEO_URLS"
           for url in "${URLS[@]}"; do
             url=$(echo "$url" | xargs)
             if [ -n "$url" ]; then
@@ -83,9 +88,14 @@ jobs:
           done
 
       - name: Download music from URLs (if configured)
-        if: ${{ secrets.MUSIC_URLS != '' }}
+        env:
+          MUSIC_URLS: ${{ secrets.MUSIC_URLS }}
         run: |
-          IFS=',' read -ra URLS <<< "${{ secrets.MUSIC_URLS }}"
+          if [ -z "$MUSIC_URLS" ]; then
+            echo "No MUSIC_URLS configured, skipping."
+            exit 0
+          fi
+          IFS=',' read -ra URLS <<< "$MUSIC_URLS"
           for url in "${URLS[@]}"; do
             url=$(echo "$url" | xargs)
             if [ -n "$url" ]; then
