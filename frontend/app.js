@@ -625,6 +625,229 @@ async function handleAnalyzeChannel() {
   }
 }
 
+// ====== DASHBOARD & TRENDS FUNCTIONS ======
+
+async function refreshDashboard() {
+  try {
+    // Best Time
+    try {
+      const bestTime = await api("/api/optimizer/best-time");
+      const btEl = $("#home-best-time");
+      if (bestTime) {
+        btEl.innerHTML = `
+          <div class="stat-card">
+            <div class="stat-value">${bestTime.recommendedTime || bestTime.bestHourLabel || "N/A"}</div>
+            <div class="stat-label">${bestTime.label || "Best Upload Time"}</div>
+            <div class="stat-detail">${bestTime.reasoning || ""}</div>
+          </div>
+        `;
+      } else {
+        btEl.innerHTML = `<p>Connect YouTube to analyze your best upload time.</p>`;
+      }
+    } catch (err) {
+      $("#home-best-time").innerHTML = `<p>Connect YouTube for personalized analytics.</p>`;
+    }
+
+    // Trending Topics from Reddit
+    try {
+      const redditData = await api("/api/trends/reddit?limit=5");
+      const trEl = $("#home-trending");
+      if (redditData.topics?.length) {
+        const list = redditData.topics.slice(0, 5).map((topic) =>
+          `<li class="trend-item">🔥 ${topic}</li>`
+        ).join("");
+        trEl.innerHTML = `<ul class="trend-list">${list}</ul>`;
+      } else {
+        trEl.innerHTML = `<p>No trends available right now.</p>`;
+      }
+    } catch (err) {
+      $("#home-trending").innerHTML = `<p>Trend feed unavailable.</p>`;
+    }
+
+    // Trending Hashtags
+    try {
+      const niche = state.config.channelContext?.split(" ")[0] || "motivation";
+      const hashData = await api(`/api/trends/hashtags?niche=${encodeURIComponent(niche)}&limit=10`);
+      const hsEl = $("#home-hashtags");
+      if (hashData.hashtags?.length) {
+        const tags = hashData.hashtags.slice(0, 10).map((tag) =>
+          `<span class="hashtag-badge">${tag}</span>`
+        ).join(" ");
+        hsEl.innerHTML = `<div class="hashtag-cloud">${tags}</div>`;
+      } else {
+        hsEl.innerHTML = `<p>Generate script first to see hashtags.</p>`;
+      }
+    } catch (err) {
+      $("#home-hashtags").innerHTML = `<p>Hashtag feed unavailable.</p>`;
+    }
+  } catch (err) {
+    console.error("Dashboard refresh error:", err);
+  }
+}
+
+async function refreshBestTime() {
+  const display = $("#best-time-display");
+  display.innerHTML = `<p class="loading">Analyzing your channel...</p>`;
+  try {
+    const data = await api("/api/optimizer/best-time");
+    if (data && data.bestHourLabel) {
+      const hourBuckets = data.hourRanking || [];
+      const hoursHtml = hourBuckets.slice(0, 8).map((h) => {
+        const pct = Math.round((h.score / (hourBuckets[0]?.score || 1)) * 100);
+        return `
+          <div class="bar-row">
+            <span class="bar-label">${h.hour}:00</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:${pct}%"></div>
+            </div>
+            <span class="bar-value">${h.avgViews || 0} views</span>
+          </div>
+        `;
+      }).join("");
+
+      display.innerHTML = `
+        <div class="best-time-result">
+          <div class="stat-card highlight">
+            <div class="stat-value">${data.recommendedTime || data.bestHourLabel}</div>
+            <div class="stat-label">${data.label || "Best Upload Time"}</div>
+            <div class="stat-detail">${data.reasoning || ""}</div>
+          </div>
+          <div class="best-day">
+            Best day: <strong>${data.bestDayName || "Monday"}</strong>
+          </div>
+          <div class="hour-ranking">
+            <h4>Hour Performance Ranking</h4>
+            <div class="bar-chart">${hoursHtml}</div>
+          </div>
+          <div class="data-note">
+            Based on ${data.sampleSize || 0} videos analyzed
+          </div>
+        </div>
+      `;
+    } else {
+      display.innerHTML = `<p>Not enough data yet. Keep uploading videos!</p>`;
+    }
+  } catch (err) {
+    display.innerHTML = `<p>Connect YouTube to analyze your best upload time.</p>`;
+  }
+}
+
+async function refreshRedditTrends() {
+  const display = $("#reddit-trends");
+  display.innerHTML = `<p class="loading">Fetching trends...</p>`;
+  try {
+    const data = await api("/api/trends/reddit?limit=10");
+    if (data.topics?.length) {
+      const list = data.topics.map((topic, i) =>
+        `<li class="trend-item" onclick="copyToClipboard('${topic.replace(/'/g, "\\'")}')">
+          <span class="trend-rank">#${i + 1}</span>
+          <span class="trend-text">${topic}</span>
+        </li>`
+      ).join("");
+      display.innerHTML = `
+        <p class="trend-hint">Click a topic to copy it (use in script prompt)</p>
+        <ol class="trend-list">${list}</ol>
+      `;
+    } else {
+      display.innerHTML = `<p>No Reddit trends available right now.</p>`;
+    }
+  } catch (err) {
+    display.innerHTML = `<p>Failed to fetch trends.</p>`;
+  }
+}
+
+async function refreshHackerNewsTrends() {
+  const display = $("#hackernews-trends");
+  display.innerHTML = `<p class="loading">Fetching trends...</p>`;
+  try {
+    const data = await api("/api/trends/hackernews?limit=10");
+    if (data.topics?.length) {
+      const list = data.topics.map((topic, i) =>
+        `<li class="trend-item" onclick="copyToClipboard('${topic.replace(/'/g, "\\'")}')">
+          <span class="trend-rank">#${i + 1}</span>
+          <span class="trend-text">${topic}</span>
+        </li>`
+      ).join("");
+      display.innerHTML = `
+        <p class="trend-hint">Click a topic to copy it</p>
+        <ol class="trend-list">${list}</ol>
+      `;
+    } else {
+      display.innerHTML = `<p>No HackerNews trends available right now.</p>`;
+    }
+  } catch (err) {
+    display.innerHTML = `<p>Failed to fetch trends.</p>`;
+  }
+}
+
+async function refreshHashtags() {
+  const topic = $("#hashtag-topic").value.trim() || state.config.channelContext || "motivation";
+  const display = $("#hashtag-display");
+  display.innerHTML = `<p class="loading">Generating hashtags...</p>`;
+  try {
+    const data = await api(`/api/trends/hashtags?topic=${encodeURIComponent(topic)}&limit=20`);
+    if (data.hashtags?.length) {
+      const tags = data.hashtags.map((tag) =>
+        `<span class="hashtag-badge clickable" onclick="copyToClipboard('${tag}')">${tag}</span>`
+      ).join(" ");
+      display.innerHTML = `
+        <p class="trend-hint">Click to copy, then paste into your video tags</p>
+        <div class="hashtag-cloud">${tags}</div>
+        <button class="secondary copy-all" onclick="copyAllHashtags()">Copy All Hashtags</button>
+      `;
+    } else {
+      display.innerHTML = `<p>No hashtags generated.</p>`;
+    }
+  } catch (err) {
+    display.innerHTML = `<p>Failed to generate hashtags.</p>`;
+  }
+}
+
+async function refreshTagPerformance() {
+  const display = $("#tag-performance-display");
+  try {
+    const data = await api("/api/optimizer/tag-performance?minViews=10");
+    if (data.tags?.length) {
+      const tags = data.tags.slice(0, 15).map((tag) => `
+        <div class="tag-perf-row">
+          <span class="tag-name">#${tag.tag}</span>
+          <span class="tag-stats">
+            ${tag.avgViews} avg views · ${tag.uses} uses · score: ${tag.score}
+          </span>
+          <div class="tag-bar">
+            <div class="tag-bar-fill" style="width:${Math.min(100, (tag.score / (data.tags[0]?.score || 1)) * 100)}%"></div>
+          </div>
+        </div>
+      `).join("");
+      display.innerHTML = `<div class="tag-perf-list">${tags}</div>`;
+    } else {
+      display.innerHTML = `<p>Upload videos first to see tag performance data.</p>`;
+    }
+  } catch (err) {
+    display.innerHTML = `<p>Tag performance unavailable.</p>`;
+  }
+}
+
+// Copy helper functions
+window.copyToClipboard = function(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).catch(() => {});
+  } else {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textarea);
+  }
+};
+
+window.copyAllHashtags = function() {
+  const tags = document.querySelectorAll("#hashtag-display .hashtag-badge");
+  const text = Array.from(tags).map(t => t.textContent).join(" ");
+  copyToClipboard(text);
+};
+
 function scheduleAutomationIfEnabled() {
   if (!state.automationEnabled) return;
   const lastRun = localStorage.getItem(STORAGE_LAST_RUN);
@@ -708,6 +931,12 @@ function attachListeners() {
   });
 
   $("#automation-upload").addEventListener("change", readAutomationToggles);
+
+  // Trends tab listeners
+  $("#refresh-best-time").addEventListener("click", refreshBestTime);
+  $("#refresh-reddit").addEventListener("click", refreshRedditTrends);
+  $("#refresh-hackernews").addEventListener("click", refreshHackerNewsTrends);
+  $("#refresh-hashtags").addEventListener("click", refreshHashtags);
 }
 
 async function init() {
@@ -728,6 +957,14 @@ async function init() {
   if (params.get("youtube") === "connected") {
     setStatus("#youtube-status", "YouTube connected.");
   }
+
+  // Load dashboard and trends data
+  refreshDashboard();
+  refreshBestTime();
+  refreshRedditTrends();
+  refreshHackerNewsTrends();
+  refreshHashtags();
+  refreshTagPerformance();
 }
 
 init().catch((err) => console.error(err));

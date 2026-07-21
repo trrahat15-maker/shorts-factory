@@ -7,8 +7,26 @@ import fs from "fs/promises";
 
 import { generateMetadata, generateScript } from "./src/openai.js";
 import { generateVoice } from "./src/voice.js";
+import {
+  generateFreeVoice,
+  checkFreeTtsStatus,
+  installEdgeTts,
+  installGtts,
+  EDGE_VOICES,
+} from "./src/freeTts.js";
 import { generateVideo } from "./src/video.js";
 import { analyzeChannel } from "./src/channelAnalysis.js";
+import {
+  getBestUploadTime,
+  getTagPerformance,
+  analyzeBestUploadTimes,
+} from "./scripts/optimizer.js";
+import {
+  fetchRedditTrends,
+  fetchHackerNewsTrends,
+  fetchTrendingHashtags,
+  scoreTopicViralPotential,
+} from "./scripts/trendSources.js";
 import {
   refreshYoutubeAccessToken,
   youtubeAuthUrl,
@@ -162,6 +180,58 @@ app.post("/api/voice", async (req, res) => {
   }
 });
 
+// ====== FREE REALISTIC TTS (edge-tts, gTTS, eSpeak) ======
+
+app.post("/api/free-voice", async (req, res) => {
+  try {
+    const { text, voice } = req.body;
+    if (!text) return res.status(400).json({ error: "Missing text" });
+    const result = await generateFreeVoice({
+      text,
+      voice: voice || process.env.FREE_TTS_VOICE || "alloy",
+      outDir: GENERATED_DIR,
+    });
+    res.json(result);
+  } catch (error) {
+    console.error(error.message || error);
+    res.status(500).json({ error: error.message || "Free TTS failed" });
+  }
+});
+
+app.get("/api/free-voice/status", async (req, res) => {
+  try {
+    const status = await checkFreeTtsStatus();
+    res.json(status);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/free-voice/voices", async (req, res) => {
+  try {
+    res.json({ voices: EDGE_VOICES, defaultVoice: "en-US-JennyNeural" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/free-voice/install", async (req, res) => {
+  try {
+    const { engine } = req.body;
+    let result = "";
+    if (engine === "edge-tts") {
+      result = await installEdgeTts();
+    } else if (engine === "gtts") {
+      result = await installGtts();
+    } else {
+      return res.status(400).json({ error: "Unknown engine. Use 'edge-tts' or 'gtts'." });
+    }
+    res.json({ ok: true, message: `${engine} installed successfully.`, output: result.substring(0, 500) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/api/base/upload", baseUpload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   const existing = await listFiles("base");
@@ -287,6 +357,114 @@ app.get("/api/youtube/callback", async (req, res) => {
 app.get("/api/youtube/tokens", async (req, res) => {
   const tokens = await getYoutubeTokens();
   res.json({ connected: Boolean(tokens?.refresh_token || tokens?.access_token) });
+});
+
+app.get("/api/optimizer/best-time", async (req, res) => {
+  try {
+    const tokens = await getYoutubeTokens();
+    let accessToken = tokens.access_token;
+    if (!accessToken && tokens.refresh_token) {
+      accessToken = await refreshYoutubeAccessToken(tokens.refresh_token);
+    }
+
+    // Try to get channel data to analyze best times
+    let bestTime = null;
+    if (accessToken) {
+      try {
+        const youtube = (await import("googleapis")).google.youtube("v3");
+        const channelRes = await youtube.channels.list({
+          part: ["contentDetails"],
+          mine: true,
+          access_token: accessToken,
+        });
+        const uploadsId = channelRes?.data?.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+        if (uploadsId) {
+          const playlistRes = await youtube.playlistItems.list({
+            part: ["contentDetails"],
+            playlistId: uploadsId,
+            maxResults: 30,
+            access_token: accessToken,
+          });
+          const videoIds = (playlistRes?.data?.items || [])
+            .map((item) => item?.contentDetails?.videoId)
+            .filter(Boolean);
+          if (videoIds.length) {
+            const videosRes = await youtube.videos.list({
+              part: ["snippet", "statistics"],
+              id: videoIds,
+              access_token: accessToken,
+            });
+            const videos = videosRes?.data?.items || [];
+            bestTime = await analyzeBestUploadTimes({ videos });
+          }
+        }
+      } catch (err) {
+        console.error("Best time analysis error:", err.message);
+      }
+    }
+
+    // Fallback to generic best time
+    if (!bestTime) {
+      bestTime = getBestUploadTime(req.query.timezone || "UTC");
+    }
+
+    res.json(bestTime);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/optimizer/tag-performance", async (req, res) => {
+  try {
+    const minViews = Number(req.query.minViews) || 50;
+    const tags = await getTagPerformance({ minViews });
+    res.json({ tags });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/trends/reddit", async (req, res) => {
+  try {
+    const subreddits = req.query.subreddits ? req.query.subreddits.split(",") : undefined;
+    const limit = Number(req.query.limit) || 10;
+    const topics = await fetchRedditTrends({ subreddits, limit });
+    res.json({ topics });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/trends/hackernews", async (req, res) => {
+  try {
+    const limit = Number(req.query.limit) || 10;
+    const topics = await fetchHackerNewsTrends({ limit });
+    res.json({ topics });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/trends/hashtags", async (req, res) => {
+  try {
+    const topic = req.query.topic || "";
+    const niche = req.query.niche || "motivation";
+    const hashtags = await fetchTrendingHashtags({ topic, niche });
+    res.json({ hashtags });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/trends/score", async (req, res) => {
+  try {
+    const { topics, channelContext } = req.body;
+    if (!Array.isArray(topics)) return res.status(400).json({ error: "topics must be an array" });
+    const scored = scoreTopicViralPotential(topics, channelContext || "");
+    res.json({ scored });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post("/api/channel/analysis", async (req, res) => {
