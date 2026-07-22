@@ -589,12 +589,30 @@ async function checkYoutubeStatus() {
   try {
     const tokens = await api("/api/youtube/tokens");
     if (tokens.connected) {
-      setStatus("#youtube-status", "YouTube connected.");
+      let status = "✅ YouTube connected.";
+      if (tokens.hasRefreshToken) status += " Refresh token valid.";
+      if (tokens.expiryDate) {
+        const daysLeft = Math.floor((tokens.expiryDate - Date.now()) / (1000 * 60 * 60 * 24));
+        status += daysLeft > 0 ? ` Token expires in ~${daysLeft} days.` : " ⚠️ Token expired!";
+      }
+      setStatus("#youtube-status", status);
     } else {
-      setStatus("#youtube-status", "Not connected.");
+      setStatus("#youtube-status", "❌ Not connected. Tap 'Connect YouTube' to authorize.");
     }
   } catch (err) {
     console.error(err);
+  }
+}
+
+async function handleRefreshYoutubeToken() {
+  setStatus("#youtube-status", "Opening authorization page...");
+  try {
+    const { url } = await api("/api/youtube/token-refresh-url");
+    // Open in a new window/tab
+    window.open(url, "_blank", "width=600,height=700");
+    setStatus("#youtube-status", "✅ Auth page opened! Authorize on the page, you'll be redirected back automatically.");
+  } catch (err) {
+    setStatus("#youtube-status", "Failed to start authorization: " + err.message);
   }
 }
 
@@ -912,6 +930,7 @@ function attachListeners() {
   $("#save-settings").addEventListener("click", saveConfig);
   $("#run-automation").addEventListener("click", () => handleAutomation(false));
   $("#connect-youtube").addEventListener("click", handleConnectYoutube);
+  $("#refresh-youtube-token").addEventListener("click", handleRefreshYoutubeToken);
   const unlockBtn = $("#unlock-vault");
   if (unlockBtn) {
     unlockBtn.addEventListener("click", () => {

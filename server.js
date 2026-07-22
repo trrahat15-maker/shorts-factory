@@ -356,7 +356,21 @@ app.get("/api/youtube/callback", async (req, res) => {
 
 app.get("/api/youtube/tokens", async (req, res) => {
   const tokens = await getYoutubeTokens();
-  res.json({ connected: Boolean(tokens?.refresh_token || tokens?.access_token) });
+  res.json({
+    connected: Boolean(tokens?.refresh_token || tokens?.access_token),
+    hasRefreshToken: Boolean(tokens?.refresh_token),
+    hasAccessToken: Boolean(tokens?.access_token),
+    expiryDate: tokens?.expiry_date || null,
+  });
+});
+
+app.get("/api/youtube/token-refresh-url", (req, res) => {
+  try {
+    const url = youtubeAuthUrl();
+    res.json({ url, message: "Open this URL on your phone to authorize YouTube. After authorizing, you'll be redirected back here and the token will be saved automatically." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get("/api/optimizer/best-time", async (req, res) => {
