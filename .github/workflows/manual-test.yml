@@ -1,0 +1,137 @@
+name: 🧪 Manual Test & Upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Test mode'
+        required: true
+        default: 'quick-test'
+        type: choice
+        options:
+          - 'quick-test'
+          - 'full-upload'
+          - 'check-setup'
+      voice:
+        description: 'Voice engine (edge-tts, gtts, espeak, elevenlabs)'
+        required: false
+        default: 'edge-tts'
+      topic:
+        description: 'Video topic (leave empty for auto)'
+        required: false
+        default: ''
+
+env:
+  YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+  YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+  YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+  PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+  PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+
+jobs:
+  test-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Install dependencies
+        run: npm install --omit=dev 2>&1 | tail -5
+        
+      - name: 🐍 Install free TTS (edge-tts)
+        run: |
+          pip install edge-tts gtts 2>/dev/null || pip3 install edge-tts gtts 2>/dev/null || echo "TTS install skipped"
+        continue-on-error: true
+
+      - name: 🔍 Check Setup
+        if: ${{ github.event.inputs.mode == 'check-setup' }}
+        env:
+          CHECK_YT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          CHECK_YT_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          CHECK_OPENAI: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "=== SETUP CHECK ==="
+          echo "Node: $(node -v)"
+          echo "NPM: $(npm -v)"
+          
+          # Check Python/TTS
+          python3 --version 2>/dev/null || python --version 2>/dev/null || echo "Python: NOT FOUND"
+          python3 -c "import edge_tts; print('edge-tts: INSTALLED')" 2>/dev/null || echo "edge-tts: NOT INSTALLED"
+          python3 -c "from gtts import gTTS; print('gTTS: INSTALLED')" 2>/dev/null || echo "gTTS: NOT INSTALLED"
+          
+          # Check YouTube tokens (via env vars)
+          echo "YouTube Client ID: $([ -n "$CHECK_YT_ID" ] && echo '✅ SET' || echo '❌ MISSING')"
+          echo "YouTube Refresh Token: $([ -n "$CHECK_YT_TOKEN" ] && echo '✅ SET' || echo '❌ MISSING')"
+          echo "OpenAI Key: $([ -n "$CHECK_OPENAI" ] && echo '✅ SET' || echo '❌ MISSING')"
+          
+          # Check base videos
+          echo "Base videos: $(ls base-videos/ 2>/dev/null | wc -l) file(s)"
+          echo "Music files: $(ls music/ 2>/dev/null | wc -l) file(s)"
+          
+          echo "=== CHECK COMPLETE ==="
+
+      - name: 🎬 Quick Test (Generate without upload)
+        if: ${{ github.event.inputs.mode == 'quick-test' }}
+        env:
+          COMMAND: 'GENERATE_BACKUP'
+          BACKUP_GENERATE_COUNT: '1'
+          VIRAL_MODE: 'true'
+          MIN_DURATION: '15'
+          MAX_DURATION: '30'
+          ENABLE_TRENDS: 'true'
+          ENABLE_STOCK_VIDEO: 'true'
+          ENABLE_IMAGE_MODE: 'true'
+          SAVE_GENERATED_VIDEOS: 'true'
+          FREE_TTS_VOICE: 'en-US-JennyNeural'
+          OPENAI_BASE_URL: 'https://openrouter.ai/api/v1'
+          OPENAI_MODEL: '${{ vars.OPENAI_MODEL || ''meta-llama/llama-3.2-3b-instruct:free'' }}'
+          TOPIC_LIST: '${{ github.event.inputs.topic || ''success,mindset,motivation'' }}'
+        run: |
+          echo "=== QUICK TEST ==="
+          echo "Generating 1 test video..."
+          mkdir -p base-videos music data logs generated_videos
+          node scripts/autoUpload.js 2>&1 || echo "⚠️ Test failed - check logs"
+          echo "=== TEST COMPLETE ==="
+
+      - name: 🚀 Full Upload
+        if: ${{ github.event.inputs.mode == 'full-upload' }}
+        env:
+          COMMAND: 'UPLOAD_NOW'
+          FORCE_UPLOAD: 'true'
+          VIRAL_MODE: 'true'
+          MIN_DURATION: '20'
+          MAX_DURATION: '40'
+          ENABLE_TRENDS: 'true'
+          ENABLE_COMPETITOR_ANALYSIS: 'true'
+          ENABLE_STOCK_VIDEO: 'true'
+          AUTO_METADATA: 'true'
+          TITLE_VARIANTS: '3'
+          HOOK_VARIANTS: '5'
+          FREE_TTS_VOICE: '${{ github.event.inputs.voice == ''elevenlabs'' && ''alloy'' || ''en-US-JennyNeural'' }}'
+          OPENAI_BASE_URL: 'https://openrouter.ai/api/v1'
+          OPENAI_MODEL: '${{ vars.OPENAI_MODEL || ''meta-llama/llama-3.2-3b-instruct:free'' }}'
+          TOPIC_LIST: '${{ github.event.inputs.topic || ''success,mindset,money,productivity,discipline'' }}'
+          YOUTUBE_PRIVACY_STATUS: 'public'
+        run: |
+          echo "=== FULL UPLOAD ==="
+          mkdir -p base-videos music data logs generated_videos
+          node scripts/autoUpload.js 2>&1
+          echo "=== UPLOAD COMPLETE ==="
+
+      - name: 📤 Upload Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            logs/
+            generated_videos/
+          retention-days: 3
+          if-no-files-found: ignore
