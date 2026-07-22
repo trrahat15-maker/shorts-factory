@@ -1,0 +1,74 @@
+name: 🔍 Diagnose YouTube Setup
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: 📋 Check GitHub Secrets Status
+        env:
+          YT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YT_REFRESH: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          OPENAI: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "=== SECRETS STATUS ==="
+          echo "YOUTUBE_CLIENT_ID: $([ -n "$YT_ID" ] && echo '✅ SET' || echo '❌ EMPTY')"
+          echo "YOUTUBE_CLIENT_SECRET: $([ -n "$YT_SECRET" ] && echo '✅ SET' || echo '❌ EMPTY')"  
+          echo "YOUTUBE_REFRESH_TOKEN: $([ -n "$YT_REFRESH" ] && echo '✅ SET' || echo '❌ EMPTY')"
+          echo "OPENAI_API_KEY: $([ -n "$OPENAI" ] && echo '✅ SET' || echo '❌ EMPTY')"
+          
+          echo ""
+          echo "=== CHECKING GOOGLE OAUTH ==="
+          
+          if [ -n "$YT_ID" ]; then
+            echo "Client ID length: ${#YT_ID} characters"
+            echo "Client ID starts with: ${YT_ID:0:10}..."
+            
+            # Test the token endpoint directly
+            echo ""
+            echo "Testing Google OAuth token endpoint..."
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://oauth2.googleapis.com/token" \
+              -H "Content-Type: application/x-www-form-urlencoded" \
+              -d "grant_type=refresh_token" \
+              --data-urlencode "client_id=$YT_ID" \
+              --data-urlencode "client_secret=$YT_SECRET" \
+              --data-urlencode "refresh_token=$YT_REFRESH" 2>&1)
+            
+            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+            BODY=$(echo "$RESPONSE" | head -n -1)
+            echo "HTTP Status: $HTTP_CODE"
+            echo "Response: $BODY"
+            
+            if echo "$BODY" | grep -q "invalid_client"; then
+              echo ""
+              echo "❌ ERROR: 'invalid_client' means your YOUTUBE_CLIENT_ID is WRONG."
+              echo ""
+              echo "Fix this:"
+              echo "1. Go to https://console.cloud.google.com/apis/credentials"
+              echo "2. Find your OAuth 2.0 Client ID"
+              echo "3. Copy the EXACT Client ID and Client Secret"
+              echo "4. Update GitHub Secrets with correct values"
+              echo ""
+              echo "⚠️ Common mistakes:"
+              echo "  - You copied the wrong ID (maybe from a different project)"
+              echo "  - You deleted/regenerated the credentials after copying"
+              echo "  - YouTube Data API v3 is not enabled on your project"
+            elif echo "$BODY" | grep -q "invalid_grant"; then
+              echo ""
+              echo "❌ ERROR: 'invalid_grant' means your REFRESH TOKEN is expired/wrong."
+              echo "You need to generate a new one."
+            elif echo "$BODY" | grep -q "access_token"; then
+              echo ""
+              echo "✅ SUCCESS! YouTube tokens are working!"
+            fi
+          else
+            echo ""
+            echo "❌ YOUTUBE_CLIENT_ID is not set as a GitHub Secret!"
+            echo "Go to: Settings → Secrets and variables → Actions"
+            echo "Add: YOUTUBE_CLIENT_ID"
+          fi
