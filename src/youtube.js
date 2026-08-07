@@ -50,33 +50,84 @@ export async function refreshYoutubeAccessToken(refreshToken) {
   return accessToken;
 }
 
-export async function uploadToYoutube({ accessToken, refreshToken, videoPath, title, description, tags = [] }) {
-  const oauth2Client = createOAuthClient();
-  oauth2Client.setCredentials({ access_token: accessToken, refresh_token: refreshToken });
-  const youtube = google.youtube({ version: "v3", auth: oauth2Client });
-
-  const res = await youtube.videos.insert({
-    part: ["snippet", "status"],
-    requestBody: {
-      snippet: {
-        title: title || "Daily Short",
-        description:
-          description ||
-          "Daily motivational shorts.\n\nSubscribe for more success mindset content.\n\n#motivation #success #discipline",
-        tags: Array.isArray(tags) ? tags : [],
-      },
-      status: {
-        privacyStatus: (process.env.YOUTUBE_PRIVACY_STATUS || "public").toLowerCase(),
-      },
-    },
-    media: {
-      body: fs.createReadStream(videoPath),
-    },
-  });
-
-  return res.data;
+/**
+ * Detect authentication-related errors (expired/invalid access token)
+ * so we can self-heal by refreshing the token and retrying.
+ */
+function isAuthError(err) {
+  const message = String(
+    `${err?.message || ""} ${err?.status || ""} ${err?.code || ""} ${
+      err?.errors?.[0]?.reason || ""
+    } ${err?.response?.status || ""}`
+  ).toLowerCase();
+  return (
+    err?.status === 401 ||
+    err?.code === 401 ||
+    err?.response?.status === 401 ||
+    /invalid_grant|invalid authentication|unauthorized|token.*expired|access_token|autherror|oauth/i.test(
+      message
+    )
+  );
 }
 
+export async function uploadToYoutube({
+  accessToken,
+  refreshToken,
+  videoPath,
+  title,
+  description,
+  tags = [],
+  persistTokens,
+}) {
+  let currentAccessToken = accessToken;
+  let attemptedRefresh = false;
+
+  const doUpload = async (token) => {
+    const oauth2Client = createOAuthClient();
+    oauth2Client.setCredentials({ access_token: token, refresh_token: refreshToken });
+    const youtube = google.youtube({ version: "v3", auth: oauth2Client });
+
+    const res = await youtube.videos.insert({
+      part: ["snippet", "status"],
+      requestBody: {
+        snippet: {
+          title: title || "Daily Short",
+          description:
+            description ||
+            "Daily motivational shorts.\n\nSubscribe for more success mindset content.\n\n#motivation #success #discipline",
+          tags: Array.isArray(tags) ? tags : [],
+        },
+        status: {
+          privacyStatus: (process.env.YOUTUBE_PRIVACY_STATUS || "public").toLowerCase(),
+        },
+      },
+      media: {
+        body: fs.createReadStream(videoPath),
+      },
+    });
+    return res.data;
+  };
+
+  try {
+    return await doUpload(currentAccessToken);
+  } catch (err) {
+    // On an expired/invalid access token, refresh it automatically and retry once
+    // so the pipeline keeps working without manual intervention (self-heal).
+    if (!isAuthError(err) || !refreshToken || attemptedRefresh) {
+      throw err;
+    }
+    attemptedRefresh = true;
+    currentAccessToken = await refreshYoutubeAccessToken(refreshToken);
+    if (currentAccessToken && typeof persistTokens === "function") {
+      try {
+        await persistTokens(currentAccessToken);
+      } catch (e) {
+        // Persisting is best-effort; never fail the upload over a storage write.
+      }
+    }
+    return doUpload(currentAccessToken);
+  }
+}
 export async function postTopLevelComment({ accessToken, refreshToken, videoId, text }) {
   if (!videoId || !text) return null;
   const oauth2Client = createOAuthClient();

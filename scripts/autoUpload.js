@@ -895,6 +895,33 @@ function scoreTitle(title) {
   return score;
 }
 
+function scoreViralText(text) {
+  if (!text) return 0;
+  const lower = String(text).toLowerCase();
+  const triggers = [
+    "secret", "nobody", "everyone", "stop", "start", "why", "how", "never",
+    "always", "worst", "best", "shocking", "crazy", "unbelievable", "hidden",
+    "truth", "exposed", "revealed", "warning", "mistake", "simple", "easy",
+    "powerful", "life hack", "you need to", "must watch",
+  ];
+  const words = lower.split(/\s+/).filter(Boolean);
+  let score = 0;
+  if (words.length >= 3 && words.length <= 8) score += 2;
+  triggers.forEach((trigger) => {
+    if (lower.includes(trigger)) score += 1;
+  });
+  if (/\d/.test(lower)) score += 1;
+  if (/[?!]/.test(lower)) score += 1;
+  return score;
+}
+
+function computeViralScore({ topic = "", title = "", hook = "" }) {
+  const total = scoreViralText(topic) + scoreViralText(title) + scoreViralText(hook || title);
+  // Cap at 15 so the score reads consistently.
+  return Math.min(15, total);
+}
+
+
 function pickBestTitle(titles) {
   if (!Array.isArray(titles) || titles.length === 0) return "";
   return titles
@@ -1570,6 +1597,8 @@ async function run() {
 
   const isGenerateBackup = command === "GENERATE_BACKUP";
   const uploadToYoutubeEnabled = command !== "GENERATE_BACKUP";
+  const viralThreshold = Number(getEnv("VIRAL_SCORE_THRESHOLD", "0"));
+  const viralGateEnabled = Number.isFinite(viralThreshold) && viralThreshold > 0;
   const backupGenerateCount = Number(getEnv("BACKUP_GENERATE_COUNT", "5")) || 5;
   const generationRuns = isGenerateBackup ? Math.min(10, Math.max(1, backupGenerateCount)) : 1;
   const saveGenerated = getEnv("SAVE_GENERATED_VIDEOS", "true").toLowerCase() !== "false";
@@ -1941,8 +1970,17 @@ async function run() {
       });
 
       let uploadResult = null;
-      if (uploadToYoutubeEnabled) {
-        log("Uploading to YouTube");
+      let skipUploadReason = "";
+      if (
+        uploadToYoutubeEnabled &&
+        viralGateEnabled &&
+        computeViralScore({ topic: runTopic, title: variantTitle, hook: variant.hook || hookTextRaw }) < viralThreshold
+      ) {
+        skipUploadReason = `Viral readiness score below threshold (threshold=${viralThreshold})`;
+      }
+      if (uploadToYoutubeEnabled && !skipUploadReason) {
+        const viralScore = computeViralScore({ topic: runTopic, title: variantTitle, hook: variant.hook || hookTextRaw });
+        log(`Uploading to YouTube (viral readiness score: ${viralScore}/15${viralGateEnabled ? `, threshold ${viralThreshold}` : ""})`);
         uploadResult = await retry(() =>
           uploadToYoutube({
             accessToken,
@@ -1965,7 +2003,7 @@ async function run() {
         log(`Studio URL: https://studio.youtube.com/video/${uploadedId}/edit`);
         log(`Channel ID: ${channelId}`);
       } else {
-        log("Backup generation mode: skipping YouTube upload.");
+        log(skipUploadReason || "Backup generation mode: skipping YouTube upload.");
       }
 
       if (saveGenerated && videoPath) {

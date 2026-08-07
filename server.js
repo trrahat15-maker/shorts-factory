@@ -88,6 +88,14 @@ function rateLimit(req, res, next) {
 
 const app = express();
 app.use(cors());
+app.disable("x-powered-by");
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  next();
+});
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "frontend")));
@@ -536,6 +544,7 @@ app.post("/api/youtube/upload", async (req, res) => {
       title,
       description,
       tags,
+      persistTokens: async (at) => setYoutubeTokens({ ...tokens, access_token: at }),
     });
     if ((process.env.AUTO_DELETE_AFTER_UPLOAD || "true").toLowerCase() !== "false") {
       await deleteFile("generated", safeVideo);
@@ -567,11 +576,17 @@ app.post("/api/automation/run", async (req, res) => {
     if (!openaiKey) {
       return res.status(400).json({ error: "Missing OpenAI API key." });
     }
-    if (!elevenLabsKey) {
+    const freeTtsEnabled = (process.env.FREE_TTS || "true").toLowerCase() !== "false";
+    if (!elevenLabsKey && !freeTtsEnabled) {
       return res.status(400).json({ error: "Missing ElevenLabs API key for automation." });
     }
 
     const tokens = upload ? await getYoutubeTokens() : {};
+    let uploadAccessToken = tokens.access_token;
+    if (upload && !uploadAccessToken && tokens.refresh_token) {
+      uploadAccessToken = await refreshYoutubeAccessToken(tokens.refresh_token);
+      await setYoutubeTokens({ ...tokens, access_token: uploadAccessToken });
+    }
     const results = [];
     const count = Number(config.videosPerDay) || 1;
     const useAutoMetadata = config.autoMetadata !== false;
@@ -631,14 +646,15 @@ app.post("/api/automation/run", async (req, res) => {
 
       let storedKey = "";
       let uploadResult = null;
-      if (upload && tokens?.access_token) {
+      if (upload && uploadAccessToken) {
         uploadResult = await uploadToYoutube({
-          accessToken: tokens.access_token,
+          accessToken: uploadAccessToken,
           refreshToken: tokens.refresh_token,
           videoPath,
           title: videoTitle,
           description: videoDescription,
           tags: videoTags,
+          persistTokens: async (at) => setYoutubeTokens({ ...tokens, access_token: at }),
         });
       }
 

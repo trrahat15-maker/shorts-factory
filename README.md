@@ -160,6 +160,7 @@ See [**SETUP.md**](SETUP.md) for the complete list. Key ones:
 | `PEXELS_API_KEY` | ❌ | - | Stock video backgrounds |
 | `DROPBOX_ACCESS_TOKEN` | ❌ | - | Backup storage |
 | `VIRAL_MODE` | ❌ | `true` | Optimize for viral Shorts |
+| `VIRAL_SCORE_THRESHOLD` | ❌ | `0` (off) | If set (>0), skips uploading any video whose viral-readiness score is below this value |
 | `SMART_SCHEDULE` | ❌ | `true` | Find best upload time |
 | `ENABLE_TRENDS` | ❌ | `true` | Scan trending topics |
 
