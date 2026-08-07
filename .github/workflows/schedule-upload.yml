@@ -94,7 +94,7 @@ jobs:
           FALLBACK_BASE_UPLOAD: 'true'
           FALLBACK_GENERATED_VIDEO: 'true'
           SAVE_GENERATED_VIDEOS: 'true'
-          YOUTUBE_PRIVACY_STATUS: 'public'
+          YOUTUBE_PRIVACY_STATUS: 'unlisted'
           
           # === FIXED: Actually working free AI models ===
           OPENAI_BASE_URL: 'https://openrouter.ai/api/v1'
