@@ -1,0 +1,39 @@
+name: 🔑 YouTube Token Health Check
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'   # Every Monday 04:00 UTC
+  workflow_dispatch:
+
+jobs:
+  token-health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test YouTube refresh token
+        env:
+          YT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YT_REFRESH: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        run: |
+          if [ -z "$YT_ID" ] || [ -z "$YT_SECRET" ] || [ -z "$YT_REFRESH" ]; then
+            echo "❌ One or more YouTube secrets are empty. Set YOUTUBE_CLIENT_ID / YOUTUBE_CLIENT_SECRET / YOUTUBE_REFRESH_TOKEN."
+            exit 1
+          fi
+          RESP=$(curl -s -X POST "https://oauth2.googleapis.com/token" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -d "grant_type=refresh_token" \
+            --data-urlencode "client_id=$YT_ID" \
+            --data-urlencode "client_secret=$YT_SECRET" \
+            --data-urlencode "refresh_token=$YT_REFRESH")
+          echo "$RESP"
+          if echo "$RESP" | grep -q "access_token"; then
+            echo "✅ YouTube refresh token is valid. (It stays permanent once your OAuth app is published.)"
+          elif echo "$RESP" | grep -q "invalid_grant"; then
+            echo "❌ REFRESH TOKEN EXPIRED. Fix it:"
+            echo "   node scripts/getYoutubeRefreshToken.js"
+            echo "   Then update the YOUTUBE_REFRESH_TOKEN GitHub secret."
+            exit 1
+          else
+            echo "⚠️ Unexpected response. Check your client ID/secret."
+            exit 1
+          fi

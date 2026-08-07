@@ -111,9 +111,9 @@ jobs:
           FALLBACK_GENERATED_VIDEO: 'true'
           SAVE_GENERATED_VIDEOS: 'true'
           YOUTUBE_PRIVACY_STATUS: 'public'
-          ISLAMIC_CONTENT: 'true'
+          ISLAMIC_CONTENT: 'false'
           ADD_HASHTAGS_TO_TITLE: 'true'
-          HASHTAGS: '#IslamicReminder,#Allah,#Sabr,#Quran,#Muslim,#Patience,#Shorts,#Tawakkul,#Dua,#Ummah'
+          HASHTAGS: '#LifeMessage,#Motivation,#Success,#Mindset,#Wisdom,#Inspiration,#Discipline,#Growth,#Shorts,#DailyReminder,#SelfImprovement,#Mindfulness'
           FREE_TTS_VOICE: 'en-US-GuyNeural'
           FREE_TTS_RATE: '+6%'
           FREE_TTS_PITCH: '+0Hz'
@@ -121,7 +121,7 @@ jobs:
           # === FIXED: Actually working free AI models ===
           OPENAI_BASE_URL: 'https://openrouter.ai/api/v1'
           OPENAI_MODEL: 'meta-llama/llama-3.2-3b-instruct:free'
-          TOPIC_LIST: 'Islamic reminders,patience in hardship,trust in Allah,Tawakkul,overcoming trials,sabr and success'
+          TOPIC_LIST: 'life lessons,overcoming struggles,success mindset,self discipline,personal growth,motivation,daily wisdom,resilience,inner peace,self improvement'
           
         run: node scripts/autoUpload.js
 
