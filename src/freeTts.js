@@ -1,15 +1,3 @@
-/**
- * FREE Realistic TTS Module
- * 
- * Priority order:
- * 1. edge-tts (Microsoft Edge neural TTS - best quality, 100% free, no API key)
- * 2. gTTS (Google Text-to-Speech - good quality, free, no API key)
- * 3. eSpeak (fallback - robotic but always available)
- *
- * edge-tts requires: Python 3.8+ and `pip install edge-tts`
- * If not installed, falls back automatically.
- */
-
 import { execFile, execSync, execFileSync } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";

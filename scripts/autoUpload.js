@@ -48,6 +48,10 @@ function shouldSkipRun() {
 
 function requireEnv() {
   const missing = REQUIRED_ENV.filter((key) => !process.env[key]);
+  if (!((process.env.APP_PIN || "").trim() || (process.env.PIN || "").trim())) {
+    missing.push("APP_PIN");
+  }
+
   const backupOnly = (process.env.BACKUP_ONLY || "false").toLowerCase() === "true";
   if (!backupOnly && !process.env.OPENAI_API_KEY) {
     missing.push("OPENAI_API_KEY");

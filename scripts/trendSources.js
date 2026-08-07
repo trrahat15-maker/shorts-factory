@@ -1,8 +1,3 @@
-/**
- * FREE Trend Sources - Multiple sources for finding trending content
- * No API keys required for most sources
- */
-
 const TRENDING_CACHE = new Map();
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 

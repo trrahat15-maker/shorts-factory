@@ -1,16 +1,3 @@
-/**
- * FILMORAGO-STYLE TEXT-TO-REEL GENERATOR
- * Creates beautiful short reels from scratch - NO base videos needed
- * 
- * Features:
- * - Animated gradient backgrounds with motion
- * - Professional text animations (fade, slide, scale, typewriter)
- * - Particle effects and visual enhancements
- * - Word-by-word subtitle sync with voice
- * - Auto color grading and effects
- * - Creates vertical 9:16 Shorts/Reels format
- */
-
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";

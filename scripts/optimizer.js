@@ -1,8 +1,3 @@
-/**
- * OPTIMIZER ENGINE - Best Time, Best Title, Best Hashtags
- * Learns from your channel performance data
- */
-
 import fs from "fs/promises";
 import path from "path";
 

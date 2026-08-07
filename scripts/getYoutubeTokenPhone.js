@@ -1,12 +1,3 @@
-/**
- * YouTube Token & Refresh Helper - Works on Phone!
- * Run once, get your refresh token. The system refreshes it automatically after that.
- * 
- * Just needs YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET set
- * - On phone: Use a free hosting service or Replit
- * - No terminal needed after the first setup
- */
-
 import { google } from "googleapis";
 import readline from "readline";
 import fs from "fs/promises";

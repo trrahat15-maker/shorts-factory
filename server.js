@@ -66,7 +66,11 @@ await ensureStorage(TEMP_DIR);
 await ensureStorage(WORK_DIR);
 await ensureLocalDirs();
 
-const APP_TOKEN = (process.env.APP_ACCESS_TOKEN || "").trim();
+const APP_PIN = (process.env.APP_PIN || process.env.PIN || "").trim();
+if (!APP_PIN) {
+  console.error("Access code not configured. Refusing to start.");
+  process.exit(1);
+}
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX || "120");
 const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || "60000");
 const rateBuckets = new Map();
@@ -105,12 +109,12 @@ app.use("/api", async (req, res, next) => {
   const bypass = req.path === "/health" || req.path === "/youtube/callback";
   if (bypass) return next();
 
-  if (!APP_TOKEN) {
-    return res.status(401).json({ error: "Server locked. Set APP_ACCESS_TOKEN to enable API access." });
+  if (!APP_PIN) {
+    return res.status(401).json({ error: "Access denied." });
   }
 
   const provided = req.headers["x-app-token"];
-  if (provided !== APP_TOKEN) {
+  if (provided !== APP_PIN) {
     return res.status(401).json({ error: "Unauthorized. Invalid access token." });
   }
   return rateLimit(req, res, next);
@@ -699,5 +703,5 @@ app.use("/uploads", express.static(UPLOAD_DIR));
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log(`Shorts Factory server listening on http://localhost:${port}`);
+  console.log(`Server listening on http://localhost:${port}`);
 });

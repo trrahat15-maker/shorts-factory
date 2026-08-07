@@ -96,6 +96,7 @@ jobs:
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          APP_PIN: ${{ secrets.APP_PIN }}
           
           VIRAL_MODE: 'true'
           MIN_DURATION: '20'
