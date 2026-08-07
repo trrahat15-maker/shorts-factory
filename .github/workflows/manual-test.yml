@@ -47,7 +47,11 @@ jobs:
         
       - name: 🐍 Install free TTS (edge-tts)
         run: |
-          pip install edge-tts gtts 2>/dev/null || pip3 install edge-tts gtts 2>/dev/null || echo "TTS install skipped"
+          pip install --break-system-packages edge-tts gtts 2>/dev/null || pip3 install --break-system-packages edge-tts gtts 2>/dev/null || pip install edge-tts gtts 2>/dev/null || pip3 install edge-tts gtts 2>/dev/null || echo "TTS install skipped"
+          # Ensure the `espeak` name works (package installs `espeak-ng`).
+          if [ -x "$(command -v espeak-ng)" ] && [ ! -x "$(command -v espeak)" ]; then
+            sudo ln -sf "$(command -v espeak-ng)" /usr/local/bin/espeak
+          fi
         continue-on-error: true
 
       - name: 🔍 Check Setup

@@ -3,6 +3,7 @@ import path from "path";
 import fetch from "node-fetch";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { generateFreeVoice } from "./freeTts.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -144,13 +145,13 @@ export async function generateVoice({ text, voice = "alloy", elevenLabsApiKey, o
         /quota|credits|invalid|unauthorized|401|429|voice_not_found|missing_permissions/i.test(message);
       if (!shouldRotate) {
         if (!allowFreeTts) throw err;
-        return generateVoiceWithEspeak({ text, outDir });
+        return generateFreeVoice({ text, voice, outDir });
       }
     }
   }
 
   if (allowFreeTts) {
-    return generateVoiceWithEspeak({ text, outDir });
+    return generateFreeVoice({ text, voice, outDir });
   }
 
   // Browser-side fallback is expected; in server context we cannot TTS without API key.

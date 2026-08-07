@@ -49,7 +49,15 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg espeak-ng python3-pip 2>/dev/null || true
-          pip3 install --quiet edge-tts gtts 2>/dev/null || true
+          # Free realistic neural voices (Microsoft Edge TTS) + Google TTS.
+          # Ubuntu 24.04 blocks system pip (PEP 668), so allow --break-system-packages.
+          pip3 install --quiet --break-system-packages edge-tts gtts 2>/dev/null \
+            || pip3 install --quiet edge-tts gtts 2>/dev/null \
+            || echo "pip TTS install skipped; will use espeak/espeak-ng fallback"
+          # Ensure the `espeak` name works (package installs `espeak-ng`).
+          if [ -x "$(command -v espeak-ng)" ] && [ ! -x "$(command -v espeak)" ]; then
+            sudo ln -sf "$(command -v espeak-ng)" /usr/local/bin/espeak
+          fi
 
       - name: Install Node dependencies
         run: npm install --omit=dev
