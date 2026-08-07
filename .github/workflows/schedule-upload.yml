@@ -110,7 +110,7 @@ jobs:
           FALLBACK_BASE_UPLOAD: 'true'
           FALLBACK_GENERATED_VIDEO: 'true'
           SAVE_GENERATED_VIDEOS: 'true'
-          YOUTUBE_PRIVACY_STATUS: 'unlisted'
+          YOUTUBE_PRIVACY_STATUS: 'public'
           ISLAMIC_CONTENT: 'true'
           ADD_HASHTAGS_TO_TITLE: 'true'
           HASHTAGS: '#IslamicReminder,#Allah,#Sabr,#Quran,#Muslim,#Patience,#Shorts,#Tawakkul,#Dua,#Ummah'
