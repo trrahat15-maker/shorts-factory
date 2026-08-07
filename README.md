@@ -161,6 +161,11 @@ See [**SETUP.md**](SETUP.md) for the complete list. Key ones:
 | `DROPBOX_ACCESS_TOKEN` | ❌ | - | Backup storage |
 | `VIRAL_MODE` | ❌ | `true` | Optimize for viral Shorts |
 | `VIRAL_SCORE_THRESHOLD` | ❌ | `0` (off) | If set (>0), skips uploading any video whose viral-readiness score is below this value |
+| `ENABLE_TRANSITIONS` | ❌ | `true` | Smooth Filmora-style crossfades between scene clips |
+| `TRANSITION_TYPE` | ❌ | `fade` | `fade`, `fadeblack`, `slideleft/right/up/down`, `wipeleft/right/down`, `circleopen/close`, `zoomin` |
+| `TRANSITION_DURATION` | ❌ | `0.4` | Transition length in seconds |
+| `FILM_GRAIN` | ❌ | `true` | Cinematic film-grain texture (Filmora look) |
+| `CINEMATIC_VIGNETTE` | ❌ | `true` | Subtle cinematic vignette |
 | `SMART_SCHEDULE` | ❌ | `true` | Find best upload time |
 | `ENABLE_TRENDS` | ❌ | `true` | Scan trending topics |
 

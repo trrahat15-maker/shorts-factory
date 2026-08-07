@@ -91,6 +91,24 @@ function buildExtraEffects({ enabled, includeEq, grade }) {
   return filters;
 }
 
+function buildCinematicFilters() {
+  const filters = [];
+  // Film grain gives a premium, cinematic "Filmora" texture.
+  const grainEnabled = (process.env.FILM_GRAIN || "true").toLowerCase() !== "false";
+  if (grainEnabled) {
+    const raw = Number(process.env.FILM_GRAIN_STRENGTH || "6");
+    const strength = Number.isFinite(raw) && raw > 0 ? Math.min(30, raw) : 6;
+    filters.push(`noise=alls=${strength}:allf=t`);
+  }
+  // Subtle cinematic vignette to focus the center (Filmora look).
+  const vignetteEnabled = (process.env.CINEMATIC_VIGNETTE || "true").toLowerCase() !== "false";
+  if (vignetteEnabled) {
+    filters.push("vignette=PI/8");
+  }
+  return filters;
+}
+
+
 function pickColorGradePreset() {
   const presetRaw = (process.env.COLOR_GRADE_PRESET || "auto").toLowerCase();
   const presets = ["warm", "cool", "vivid", "cinematic", "punchy", "soft"];
@@ -372,6 +390,7 @@ export async function generateVideo({
     .concat(coldOpenFilter ? [coldOpenFilter] : [])
     .concat(gradeFilter ? [gradeFilter] : [])
     .concat(extraFilters)
+    .concat(buildCinematicFilters())
     .concat(subtitleFilters)
     .concat(hookFilter ? [hookFilter] : [])
     .concat(popupFilters)
@@ -704,7 +723,76 @@ async function renderSceneVideo({
   }
 }
 
-async function concatScenes(scenePaths, outPath) {
+async function concatWithTransitions(scenePaths, outPath) {
+  // Pick a valid Filmora-style xfade transition.
+  const raw = (process.env.TRANSITION_TYPE || "fade").toLowerCase();
+  const allowed = [
+    "fade", "fadeblack", "slideleft", "slideright", "slideup", "slidedown",
+    "wipeleft", "wiperight", "wipedown", "circleopen", "circleclose", "zoomin",
+  ];
+  const transition = allowed.includes(raw) ? raw : "fade";
+  const duration = Math.max(0.2, Number(process.env.TRANSITION_DURATION || "0.4"));
+
+  // Probe each clip's real duration so xfade offsets stay within bounds.
+  const durations = [];
+  for (const p of scenePaths) {
+    const d = await getMediaDuration(p);
+    durations.push(typeof d === "number" && d > 0 ? d : 3);
+  }
+
+  const offsets = [];
+  let acc = durations[0];
+  for (let i = 1; i < durations.length; i += 1) {
+    offsets.push(Math.max(0, acc - duration));
+    acc += durations[i] - duration;
+  }
+
+  return new Promise((resolve, reject) => {
+    const command = ffmpeg();
+    scenePaths.forEach((p) => command.input(p));
+
+    const parts = [];
+    let prev = "[0:v]";
+    for (let i = 0; i < offsets.length; i += 1) {
+      const label = `[v${i + 1}]`;
+      parts.push(
+        `${prev}[${i + 1}:v]xfade=transition=${transition}:duration=${duration}:offset=${offsets[i].toFixed(3)}${label}`
+      );
+      prev = label;
+    }
+
+    command
+      .complexFilter(parts.join(";"))
+      .outputOptions([
+        "-map", prev,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-r", "30",
+        "-movflags", "+faststart",
+        "-y",
+      ])
+      .output(outPath)
+      .on("end", () => resolve(outPath))
+      .on("error", (err) => reject(err))
+      .run();
+  });
+}
+
+async function concatScenes(scenePaths, outPath, options = {}) {
+  const enableTransitions =
+    options.transitions !== false &&
+    (process.env.ENABLE_TRANSITIONS || "true").toLowerCase() !== "false";
+
+  if (enableTransitions && scenePaths.length >= 2) {
+    try {
+      return await concatWithTransitions(scenePaths, outPath);
+    } catch (err) {
+      console.warn(`[video] Transitions failed (${err.message}); using hard cuts.`);
+    }
+  }
+
   const listPath = path.join(path.dirname(outPath), `concat-${Date.now()}.txt`);
   const list = scenePaths.map((file) => `file '${file.replace(/'/g, "'\\''")}'`).join("\n");
   fs.writeFileSync(listPath, list);
@@ -835,7 +923,7 @@ export async function generateStockBaseVideo({ scenes, outDir, totalDuration }) 
   }
 
   const mergedPath = path.join(outDir, `stock-base-${Date.now()}.mp4`);
-  return concatScenes(tempScenes, mergedPath);
+  return concatScenes(tempScenes, mergedPath, { transitions: true });
 }
 
 export async function generateThumbnail({ videoPath, outDir, hookText, style = {} }) {
