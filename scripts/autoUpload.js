@@ -654,6 +654,20 @@ function buildTitleHashtags(title, maxCount = 5) {
   return unique.slice(0, maxCount).map((w) => `#${w}`);
 }
 
+function appendHashtagsToTitle(title, hashtags, maxLength = 100) {
+  if (!title || !Array.isArray(hashtags) || !hashtags.length) return title;
+  const clean = hashtags.map((h) => String(h).trim()).filter(Boolean);
+  if (!clean.length) return title;
+  let result = String(title).trim();
+  for (const tag of clean) {
+    const candidate = `${result} ${tag}`.trim();
+    if (candidate.length > maxLength) break; // YouTube title limit is 100 chars
+    result = candidate;
+  }
+  return result;
+}
+
+
 function hashtagsToTags(hashtags) {
   return (hashtags || [])
     .map((tag) => String(tag).replace(/^#/, "").trim())
@@ -1751,6 +1765,7 @@ async function run() {
           if (!titleOverride) {
             variantTitle = metadata.title || pickBestTitle(metadata.titles || []);
           }
+
           if (!descriptionOverride && metadata.description) variantDescription = metadata.description;
           if (!tagsOverride.length && metadata.tags?.length) variantTags = metadata.tags;
         } catch (err) {
@@ -1776,6 +1791,9 @@ async function run() {
       }
       if (!variantTags.includes("shorts")) {
         variantTags = [...variantTags, "shorts"];
+      }
+      if (extraHashtags.length && getEnv("ADD_HASHTAGS_TO_TITLE", "true").toLowerCase() !== "false") {
+        variantTitle = appendHashtagsToTitle(variantTitle, extraHashtags, 100);
       }
       log(`Using title: ${variantTitle}`);
       log(`Using tags: ${variantTags.join(", ") || "none"}`);

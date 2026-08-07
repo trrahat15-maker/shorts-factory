@@ -149,7 +149,7 @@ import sys
 
 async def main():
     try:
-        tts = edge_tts.Communicate("""${escapePythonString(text)}""", "${resolvedVoice}")
+        tts = edge_tts.Communicate("""${escapePythonString(text)}""", "${resolvedVoice}", rate="${process.env.FREE_TTS_RATE || "+6%"}", pitch="${process.env.FREE_TTS_PITCH || "+0Hz"}", volume="${process.env.FREE_TTS_VOLUME || "+0%"}")
         await tts.save("${escapePythonString(outPath)}")
         print("OK")
     except Exception as e:

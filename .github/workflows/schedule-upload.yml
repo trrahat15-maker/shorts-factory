@@ -111,11 +111,17 @@ jobs:
           FALLBACK_GENERATED_VIDEO: 'true'
           SAVE_GENERATED_VIDEOS: 'true'
           YOUTUBE_PRIVACY_STATUS: 'unlisted'
+          ISLAMIC_CONTENT: 'true'
+          ADD_HASHTAGS_TO_TITLE: 'true'
+          HASHTAGS: '#IslamicReminder,#Allah,#Sabr,#Quran,#Muslim,#Patience,#Shorts,#Tawakkul,#Dua,#Ummah'
+          FREE_TTS_VOICE: 'en-US-GuyNeural'
+          FREE_TTS_RATE: '+6%'
+          FREE_TTS_PITCH: '+0Hz'
           
           # === FIXED: Actually working free AI models ===
           OPENAI_BASE_URL: 'https://openrouter.ai/api/v1'
           OPENAI_MODEL: 'meta-llama/llama-3.2-3b-instruct:free'
-          TOPIC_LIST: 'success,mindset,money,productivity,discipline'
+          TOPIC_LIST: 'Islamic reminders,patience in hardship,trust in Allah,Tawakkul,overcoming trials,sabr and success'
           
         run: node scripts/autoUpload.js
 
