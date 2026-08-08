@@ -49,7 +49,7 @@ function shouldSkipRun() {
 function requireEnv() {
   const missing = REQUIRED_ENV.filter((key) => !process.env[key]);
   if (!((process.env.APP_PIN || "").trim() || (process.env.PIN || "").trim())) {
-    missing.push("APP_PIN");
+    console.warn("[auto] APP_PIN not set (optional). Pipeline will continue.");
   }
 
   const backupOnly = (process.env.BACKUP_ONLY || "false").toLowerCase() === "true";

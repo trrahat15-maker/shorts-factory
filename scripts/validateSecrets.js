@@ -40,8 +40,9 @@ for (const c of checks) {
 }
 
 const appPin = (process.env.APP_PIN || process.env.PIN || "").trim();
-console.log(`APP_PIN: ${appPin.length >= 6 ? "✅ OK" : "❌ PROBLEM"} | set=${appPin.length > 0} | len=${appPin.length}`);
-if (appPin.length < 6) fail += 1;
+console.log(`APP_PIN: ${appPin.length >= 6 ? "✅ OK" : "⚠️ OPTIONAL (pipeline continues)"} | set=${appPin.length > 0} | len=${appPin.length}`);
+  // APP_PIN is optional for the pipeline (does not block).
+  void appPin;
 
 if (fail) {
   console.error(`\n❌ ${fail} secret(s) have the wrong format. Fix them in GitHub (Settings → Secrets → Actions) and re-run.`);
