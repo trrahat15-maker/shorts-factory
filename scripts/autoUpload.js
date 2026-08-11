@@ -1481,24 +1481,35 @@ async function run() {
   }
   const targetSeconds = Math.max(minDuration || 0, targetSecondsRaw || 30);
   const islamicContent = getEnv("ISLAMIC_CONTENT", "false").toLowerCase() === "true";
-  const prompt = getEnv(
-    "PROMPT",
-    [
-      `Write a ${targetSeconds} second viral YouTube Shorts script.`,
-      "Structure:",
-      "0-2 sec: scroll-stopping hook.",
-      "2-10 sec: curiosity + tension.",
-      "10-30 sec: fast value or story.",
-      "Last 3 sec: loop ending that connects back to the first line.",
-      "Use triggers: curiosity, fear, success, money, secrets.",
-      "Hook examples: \"You're doing this wrong...\", \"This is why you're not successful...\", \"Nobody tells you this...\"",
-      "Keep sentences short and punchy (5-12 words per phrase).",
-      "Add natural micro-pauses using commas, dashes, or ellipses.",
-      islamicContent
-        ? "Include authentic Islamic values and themes (sabr, tawakkul, gratitude, prayer, self-discipline). Do not invent quotes or hadith; keep it respectful and general."
-        : "",
-    ].filter(Boolean).join(" ")
-  );
+  const defaultPrompt = [
+    `Write a ${targetSeconds} second viral YouTube Shorts script.`,
+    "Structure:",
+    "0-2 sec: scroll-stopping hook.",
+    "2-10 sec: curiosity + tension.",
+    "10-30 sec: fast value or story.",
+    "Last 3 sec: loop ending that connects back to the first line.",
+    "Use triggers: curiosity, fear, success, money, secrets.",
+    `Hook examples: "You're doing this wrong...", "This is why you're not successful...", "Nobody tells you this..."`,
+    "Keep sentences short and punchy (5-12 words per phrase).",
+    "Add natural micro-pauses using commas, dashes, or ellipses.",
+    islamicContent
+      ? "Include authentic Islamic values and themes (sabr, tawakkul, gratitude, prayer, self-discipline). Do not invent quotes or hadith; keep it respectful and general."
+      : "",
+  ].filter(Boolean).join(" ");
+
+  let prompt = getEnv("PROMPT", "").trim();
+  if (!prompt) {
+    const promptFile = getEnv("PROMPT_FILE", "").trim();
+    if (promptFile) {
+      try {
+        prompt = await fs.readFile(path.resolve(process.cwd(), promptFile), "utf8");
+      } catch (err) {
+        log(`PROMPT_FILE load failed: ${err.message}`);
+      }
+    }
+    if (!prompt) prompt = defaultPrompt;
+  }
+
   const language = getEnv("SCRIPT_LANGUAGE", "English").trim();
   const topics = parseCsv(getEnv("TOPIC_LIST", "success,mindset,money,productivity"));
   const blockedTopics = parseCsv(getEnv("TOPIC_BLOCKLIST", ""));

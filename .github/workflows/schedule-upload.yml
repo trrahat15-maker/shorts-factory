@@ -101,7 +101,7 @@ jobs:
           
           VIRAL_MODE: 'true'
           MIN_DURATION: '20'
-          MAX_DURATION: '40'
+          MAX_DURATION: '30'
           ENABLE_TRENDS: 'true'
           AUTO_METADATA: 'true'
           TITLE_VARIANTS: '3'
@@ -117,12 +117,13 @@ jobs:
           ADD_HASHTAGS_TO_TITLE: 'true'
           HASHTAGS: '#LifeMessage,#Motivation,#Success,#Mindset,#Wisdom,#Inspiration,#Discipline,#Growth,#Shorts,#DailyReminder,#SelfImprovement,#Mindfulness'
           FREE_TTS_VOICE: 'en-US-GuyNeural'
-          FREE_TTS_RATE: '+6%'
+          FREE_TTS_RATE: '+2%'
           FREE_TTS_PITCH: '+0Hz'
           
           # === FIXED: Actually working free AI models ===
           OPENAI_BASE_URL: 'https://openrouter.ai/api/v1'
           OPENAI_MODEL: 'meta-llama/llama-3.2-3b-instruct:free'
+          PROMPT_FILE: 'scripts/viral-script-prompt.txt'
           TOPIC_LIST: 'life lessons,overcoming struggles,success mindset,self discipline,personal growth,motivation,daily wisdom,resilience,inner peace,self improvement'
           
         run: node scripts/autoUpload.js
